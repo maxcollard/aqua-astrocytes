@@ -1,6 +1,6 @@
 """Management tools for data exported from AQuA
 
-For Matlab AQuA library, see https://github.com/yu-lab-vt/AQuA
+For details of AQuA for Matlab, see https://github.com/yu-lab-vt/AQuA
 """
 
 ## Imports
@@ -19,43 +19,167 @@ import yaml
 
 from tqdm import tqdm
 
+## Constants
+
+
+
 ## HiveManager helpers
+
+# Filename parsers
 
 def default_filename_parser( fn ):
     """Parses a filename to a dict that only contains the filename under the key 'filename'"""
+    return { 'filename': fn }
+
+def _parse_standard_part( part, spec ):
     ret = dict()
-    ret['filename'] = fn
+    
+    spec_kind = spec[0]
+    
+    if spec_kind == 'suffix':
+        # Match against the given suffix
+        suffix = spec[1]
+        if part != suffix:
+            # Suffix does not match; exclude this file
+            return None
+
+    elif spec_kind == 'date':
+        # Extract the date using the given format
+        key = spec[1]
+        date_format = spec[2]
+        ret['date'] = datetime.strptime( part, date_format )
+
+    elif spec_kind == 'raw':
+        # Pull out exactly the string in the part
+        key = spec[1]
+        ret[key] = part
+
+    elif spec_kind == 'number':
+        # Find the desired integer in the part
+        key = spec[1]
+        # Default to first integer
+        index = 0 if len( spec ) < 3 else spec[2]
+        
+        numbers = re.findall( '\d+', part )
+        if len( numbers ) == 0:
+            # No number found
+            ret[key] = None
+        else:
+            # Hold onto the desired number
+            ret[key] = int( numbers[index] )
+
+    elif spec_kind == 'switch':
+        # Look for matches against a set of possibilities
+        key = spec[1]
+        labels = spec[2]
+        
+        match = None
+        for part_label, data_label in labels.items():
+            if part_label in part:
+                match = data_label
+                break
+        
+        if match is None:
+            ret[key] = None
+        else:
+            ret[key] = match
+        
     return ret
 
-def fov_id_postprocessor( df ):
-    """Labels each unique FOV for each mouse / slice with its own id"""
+def _parse_standard( fn, spec, split ):
+    ret = dict()
+    ret['filename'] = fn
     
-    # TODO This is such a terrible way to do this lol
+    # Split name into its parts
+    name, ext = os.path.splitext( fn )
+    name_split = name.split( split )
     
-    mice = list( sorted( set( df['mouse'] ) ) )
-    mouse_slices = { mouse: list( sorted( set( df[df['mouse'].str.match( mouse )]['slice'] ) ) )
-                     for mouse in mice }
-    mouse_slice_fovs = { mouse: { sl: list( sorted( set( df[df['mouse'].str.match( mouse )
-                                                            & (df['slice'] == sl)]['fov'] ) ) )
-                                  for sl in slices }
-                         for mouse, slices in mouse_slices.items() }
-
-    fov_combinations = [ { 'mouse': mouse, 'slice': sl, 'fov': fov }
-                         for mouse, slice_fovs in mouse_slice_fovs.items()
-                         for sl, fovs in slice_fovs.items()
-                         for fov in fovs ]
-    fov_id_combination = list( zip( itertools.count( start = 1 ), fov_combinations ) )
-
-    # TODO Would be slick to do some nifty DataFrame dict indexing
-
-    fov_ids = np.zeros( (df.shape[0],) )
-    for fov_id, combo in fov_id_combination:
-        query = ( (df['mouse'] == combo['mouse'])
-                  & (df['slice'] == combo['slice'])
-                  & (df['fov'] == combo['fov']) )
-        fov_ids[query] = fov_id
+    # Label the split parts
+    name_spec = zip( name_split, spec )
+    
+    # Parse each part
+    for cur_part, cur_specs in name_spec:
+        if cur_specs is None:
+            # Ignore this part
+            continue
         
-    return fov_ids.astype( int )
+        if type( cur_specs ) != list:
+            # Normalize specs by turning all specs into a list
+            cur_specs = [cur_specs]
+        
+        for cur_spec in cur_specs:
+            try:
+                cur_parsed = _parse_standard_part( cur_part, cur_spec )
+            except Exception as e:
+                # Failed to parse this part; keep going
+                print( e )
+                continue
+            
+            if cur_parsed is None:
+                # Signal to short-circuit (filter)
+                return None
+            
+            # Add the new information into the record we're building
+            ret.update( cur_parsed )
+    
+    return ret
+
+def get_standard_filename_parser( spec, split = '_' ):
+    """Parser that takes individual components by splitting each filename in the hive using
+    a specified separator string
+    
+    Arguments:
+    spec - a list specifying how each part of the filename should be parsed; see examples
+    
+    Keyword arguments:
+    split - string to separate parts of the filename to be processed. Default: '_'
+    """
+    return lambda fn: _parse_standard( fn, spec, split )
+
+# Postprocessors
+
+def _postprocess_index( df,
+                        f = lambda i: i + 1,
+                        dtype = int ):
+    ret = np.zeros( df.shape[0], dtype = dtype )
+    for i_row, i in enumerate( df.index ):
+        ret[i_row] = f( i )
+    return ret
+
+# TODO Can easily combine this with get_map_postprocessor
+def get_index_postprocessor( **kwargs ):
+    """Maps the function given as `f` over the index of each row
+    Default: `f` turns the zero-indexing in df's index into a one-indexed id; i.e.,
+        f = lambda i: i + 1
+    
+    Keyword arguments:
+    dtype - explicit data type of the return value of `f` (Default: int)
+    """
+    return lambda df: _postprocess_index( df, **kwargs)
+
+def _postprocess_map( df, f, dtype = float ):
+    ret = np.zeros( df.shape[0], dtype = dtype )
+    for i_row, row in df.iterrows():
+        ret = f( row )
+    return ret
+
+def get_map_postprocessor( f, **kwargs ):
+    """Maps the function `f` over each row
+    
+    Keyword arguments:
+    dtype - explicit data type of the return value of `f` (Default: float)
+    """
+    return lambda df: _postprocess_map( df, **kwargs )
+
+def _postprocess_coreg( df, coreg_keys ):
+    ret = np.zeros( df.shape[0], dtype = int )
+    for i_group, (group_idx, group_slice) in enumerate( df.groupby( list( coreg_keys ) ) ):
+        ret[group_slice.index] = i_group + 1
+    return ret
+
+def get_coreg_postprocessor( coreg_keys ):
+    """Gives a unique identifier to each combination of values in `coreg_keys`"""
+    return lambda df: _postprocess_coreg( df, coreg_keys )
 
 def _postprocess_label( df, labels ):
     # TODO This is pretty slow
@@ -164,7 +288,8 @@ def _postprocess_transform( df, key,
     cur_data = df[key]
     
     if invert:
-        cur_data = -cur_data
+        # TODO Nomenclature is bad here
+        cur_data = np.abs( cur_data )
     
     if binarize:
         return (cur_data > 0).astype( float )
@@ -221,6 +346,7 @@ class HiveManager:
     
     def __init__( self, path,
                   parser = None,
+                  all_manual = False,
                   extension = '.mat' ):
         """Initializes a hive for the given path
         
@@ -244,12 +370,47 @@ class HiveManager:
         
         self.__dataset_postprocessors = []
         self.__event_postprocessors = []
-    
-#     @property
-#     def dataset_postprocessors( self ):
-#         """Each value constructs a new column for `datasets` based on the pre-existing values
-#         in the DataFrame; each key is the name of the newly created column"""
-#         return self.__dataset_postprocessors
+        self.__all_event_postprocessors = []
+        self.__raster_postprocessors = []
+        self.__all_raster_postprocessors = []
+        
+        if not all_manual:
+            self.add_default_postprocessors()
+            
+    def add_default_postprocessors( self ):
+        """Adds a set of default postprocessors that make sense for most applications
+        
+        This includes:
+        ** Dataset postprocessors **
+        - 'dataset_id' -> default get_index_postprocessor (1-indexed dataset ID)
+        ** Event postprocessors **
+        - calls `add_standard_event_postprocessors` (intelligently handles standard AQuA marks)
+        
+        If events have associated cells, this also includes:
+        ** Event & Raster postprocessors (when loading ALL) **
+        - 'cell_global' -> coreg postprocessor on ['dataset_id', 'cell']
+            (This will give a *global* cell ID across datasets)
+        """
+        
+        # One-indexed 'dataset_id'
+        self.add_dataset_postprocessor( 'dataset_id', get_index_postprocessor() )
+        
+        # Standard postprocessing on known marks
+        self.add_standard_event_postprocessors()
+        
+        # If our events have cells, add global cell ID on 'cell_global'
+        # TODO This could change after the HiveManager is instantiated!
+        # TODO This assumes homogeneity across all datasets being managed!
+        cur_datasets = self.datasets
+        if len( cur_datasets ) > 0:
+            _, first_events = self.load_events( cur_datasets.iloc[0] )
+            if 'cell' in first_events.keys():
+                self.add_event_postprocessor( 'cell_global',
+                                              get_coreg_postprocessor( ['dataset_id', 'cell'] ),
+                                              for_all = True )
+                self.add_raster_postprocessor( 'cell_global',
+                                               get_coreg_postprocessor( ['dataset_id', 'cell'] ),
+                                               for_all = True )
     
     def add_dataset_postprocessor( self, key, postprocessor ):
         """Add a new dataset postprocessor to the chain / update an existing postprocessor entry
@@ -267,15 +428,57 @@ class HiveManager:
 #         if key in self.__dataset_postprocessors:
 #             del self.__dataset_postprocessors[key]
     
-    def add_event_postprocessor( self, key, postprocessor ):
+    def add_event_postprocessor( self, key, postprocessor,
+                                 for_all = False,
+                                 front = False ):
         """Add a new event postprocessor to the chain / update an existing postprocessor entry
         
         Arguments:
         key - The name of the column created by the postprocessor
         postprocessor - A function df -> iterable that constructs a new column based on the
             existing data in a loaded events DataFrame
+            
+        Keyword arguments:
+        for_all - when True, adds to the list of postprocessors that are executed when data is
+            loaded with `all_events` at the *very end* of loading
+        front - when True, appends the postprocessor to the *front* of the chain
         """
-        self.__event_postprocessors.append( (key, postprocessor) )
+        if for_all:
+            if front:
+                self.__all_event_postprocessors.insert( 0, (key, postprocessor) )
+            else:
+                self.__all_event_postprocessors.append( (key, postprocessor) )
+        else:
+            if front:
+                self.__event_postprocessors.insert( 0, (key, postprocessor) )
+            else:
+                self.__event_postprocessors.append( (key, postprocessor) )
+            
+    def add_raster_postprocessor( self, key, postprocessor,
+                                  for_all = False,
+                                  front = False ):
+        """Add a new raster postprocessor to the chain / update an existing postprocessor entry
+        
+        Arguments:
+        key - the name of the column created by the postprocessor
+        postprocessor - a function df -> iterable that constructs a new column based on the
+            existing data in a loaded raster DataFrame
+            
+        Keyword arguments:
+        for_all - when True, adds to the list of postprocessors that are executed when data is
+            loaded with `all_events` at the *very end* of loading
+        front - when True, appends the postprocessor to the *front* of the chain
+        """
+        if for_all:
+            if front:
+                self.__all_raster_postprocessors.insert( 0, (key, postprocessor) )
+            else:
+                self.__all_raster_postprocessors.append( (key, postprocessor) )
+        else:
+            if front:
+                self.__raster_postprocessors.insert( 0, (key, postprocessor) )
+            else:
+                self.__raster_postprocessors.append( (key, postprocessor) )
         
     # TODO Include some way to remove postprocessors
 #     def remove_event_postprocessor( self, key ):
@@ -283,12 +486,17 @@ class HiveManager:
 #         if key in self.__event_postprocessors:
 #             del self.__event_postprocessors[key]
     
-    def add_event_laterality_postprocessors( self ):
+    def add_laterality_postprocessors( self,
+                                       front = True ):
         """Convenience method to properly align lateral / medial
         
         Assumes that the event data have the 'left_right' column with two possible values:
         - 'LM': lateral is on the left, medial on the right
         - 'ML': medial on the left, lateral on the right
+        
+        Keyword arguments:
+        front - if True (default) appends these to the *front* of the postprocessing chain
+            (this is usually best; the standard pipeline should come *after* these are computed)
         """
         grow_lateral_spec = {
             'LM': 'mark_propGrowLeft',
@@ -308,13 +516,17 @@ class HiveManager:
         }
         
         self.add_event_postprocessor( 'mark_propGrowLateral',
-                                      get_conditional_postprocessor( 'left_right', grow_lateral_spec) )
+                                      get_conditional_postprocessor( 'left_right', grow_lateral_spec),
+                                      front = front )
         self.add_event_postprocessor( 'mark_propGrowMedial',
-                                      get_conditional_postprocessor( 'left_right', grow_medial_spec) )
+                                      get_conditional_postprocessor( 'left_right', grow_medial_spec),
+                                      front = front )
         self.add_event_postprocessor( 'mark_propShrinkLateral',
-                                      get_conditional_postprocessor( 'left_right', shrink_lateral_spec) )
+                                      get_conditional_postprocessor( 'left_right', shrink_lateral_spec),
+                                      front = front )
         self.add_event_postprocessor( 'mark_propShrinkMedial',
-                                      get_conditional_postprocessor( 'left_right', shrink_medial_spec) )
+                                      get_conditional_postprocessor( 'left_right', shrink_medial_spec),
+                                      front = front )
     
     def add_standard_event_postprocessors( self ):
         """Add a standard postprocessing pipeline"""
@@ -449,19 +661,6 @@ class HiveManager:
         postprocess - set to False to disable event postprocessing. Default: True
         """
         
-#         if type( dataset ) == str:
-#             # String filename provided; determine dataset using parser
-#             dataset = self.parser( dataset )
-        
-#         if dataset_keys is None:
-#             # Default behavior is to merge all parts of the dataset spec except the filename
-#             dataset_keys = [k for k in dataset.keys() if k != 'filename']
-#         else:
-#             # Check to make sure the desired keys are in the dataset
-#             for k in dataset_keys:
-#                 if k not in dataset.keys():
-#                     raise Exception( f'Merge key "{k}" not in dataset' )
-        
         dataset, dataset_keys = self.__get_dataset_keys( dataset, dataset_keys )
     
         if header_keys is None:
@@ -495,7 +694,12 @@ class HiveManager:
                 header['Ts'] = None
 
             event_frames = file['eventFrames'][0, :].astype( int )
-            event_cells = file['eventCells'][0, :].astype( int )
+            
+            # Not all datasets have cells!
+            if 'eventCells' in file.keys():
+                event_cells = file['eventCells'][0, :].astype( int )
+            else:
+                event_cells = None
             
             # Determine marks and headers
             for k in file.keys():
@@ -511,18 +715,20 @@ class HiveManager:
         
         event_times = None if header['Ts'] is None else header['Ts'] * event_frames
         
-        ret_dict['cell'] = []
         ret_dict['start_frame'] = []
         if event_times is not None:
             ret_dict['start_time'] = []
+        if event_cells is not None:
+            ret_dict['cell'] = []
         for k in marks.keys():
             ret_dict[k] = []
         
         for i_event in range( n_events ):
             ret_dict['start_frame'].append( event_frames[i_event] )
-            ret_dict['cell'].append( event_cells[i_event] )
             if event_times is not None:
                 ret_dict['start_time'].append( event_times[i_event] )
+            if event_cells is not None:
+                ret_dict['cell'].append( event_cells[i_event] )
             for k in marks.keys():
                 ret_dict[k].append( marks[k][i_event] )
         
@@ -543,12 +749,15 @@ class HiveManager:
     def load_raster( self, dataset,
                      dataset_keys = None,
                      header_keys = None,
-                     bin_width = None):
+                     bin_width = None,
+                     output = 'df' ):
         """Construct a raster from the events in a dataset
         
         Returns:
         header - overall information about the dataset
-        raster - DataFrame, each row is one time bin
+        raster - the raster in the format specified by the `output` kwarg:
+            'df' - (Default) `raster` is a DataFrame, where each row is a bin for an individual cell
+            'array' - `raster` is a [cell, bin] numpy array
         
         Arguments:
         dataset - a string denoting the filename in the hive to load, or a Series containing
@@ -579,6 +788,7 @@ class HiveManager:
         # Copy over the event headers
         header = dict()
         header.update( event_header )
+        
         # Note down the bin width
         header['bin_width'] = bin_width
         
@@ -586,11 +796,14 @@ class HiveManager:
         
         bin_centers = None
         if bin_width is None:
+            # Make each bin a single frame
+            
             frame_max = np.max( events['start_frame'] ) + 1
             bin_edges_frames = np.arange( 0, frame_max + 1 ) - 0.5
             bin_centers_frames = bin_edges_frames[:-1] + 0.5 * np.diff( bin_edges_frames )
             
             if 'Ts' in event_header.keys():
+                # Since sampling time is set, we can do conversions to seconds
                 bin_centers = event_header['Ts'] * bin_centers_frames
             
             cell_event_frames = [ events[events['cell'] == cell]['start_frame']
@@ -599,9 +812,13 @@ class HiveManager:
             cell_raster = np.zeros( (n_cells, bin_centers_frames.shape[0]) )
             for i_cell, fs in enumerate( cell_event_frames ):
                 cell_raster[i_cell, :], _ = np.histogram( fs, bin_edges_frames )
+            
         else:
+            # Each bin has width `bin_width
+            
             if 'start_time' not in events.keys():
-                raise Exception( 'Cannot make raster with no event times' )
+                raise Exception( f'Cannot make raster with `bin_width` {bin_width:0.3f}: no event times' )
+            
             t_max = np.max( events['start_time'] ) + bin_width
             bin_edges = np.arange( 0, t_max, bin_width )
             bin_centers = bin_edges[:-1] + 0.5 * np.diff( bin_edges )
@@ -612,74 +829,94 @@ class HiveManager:
             cell_raster = np.zeros( (n_cells, bin_centers.shape[0]) )
             for i_cell, ts in enumerate( cell_event_times ):
                 cell_raster[i_cell, :], _ = np.histogram( ts, bin_edges )
-                
-        ret_dict = dict()
-        ret_dict['cell'] = []
-        ret_dict['event_count'] = []
-        if bin_centers is not None:
-            ret_dict['center_time'] = []
-        if bin_width is None:
-            ret_dict['center_frame'] = []
         
-        for i_cell in range( cell_raster.shape[0] ):
-            for i_bin in range( cell_raster.shape[1] ):
-                ret_dict['cell'].append( i_cell + 1 )
-                ret_dict['event_count'].append( int( cell_raster[i_cell, i_bin] ) )
-                if bin_centers is not None:
-                    ret_dict['center_time'].append( bin_centers[i_bin] )
-                if bin_width is None:
-                    ret_dict['center_frame'].append( int( bin_centers_frames[i_bin] ) )
+        if output.lower() == 'array':
+            # Short-circuit building the DataFrame and just return `cell_raster`
+            return header, cell_raster
         
-        ret = pd.DataFrame.from_dict( ret_dict )
-        
-        for k in dataset_keys:
-            ret[k] = dataset[k]
-            
-        for k in header_keys:
-            ret[k] = header[k][0, 0]
-        
-#         if postprocess:
-#             _postprocess( ret, self.__event_postprocessors )
-        
-        return header, ret
+        if output.lower() == 'df' or output.lower == 'dataframe':
+            # Reformat the output as a DataFrame
+
+            ret_dict = dict()
+            ret_dict['cell'] = []
+            ret_dict['event_count'] = []
+            if bin_centers is not None:
+                ret_dict['center_time'] = []
+            if bin_width is None:
+                ret_dict['center_frame'] = []
+
+            for i_cell in range( cell_raster.shape[0] ):
+                for i_bin in range( cell_raster.shape[1] ):
+                    ret_dict['cell'].append( i_cell + 1 )
+                    ret_dict['event_count'].append( int( cell_raster[i_cell, i_bin] ) )
+                    if bin_centers is not None:
+                        ret_dict['center_time'].append( bin_centers[i_bin] )
+                    if bin_width is None:
+                        ret_dict['center_frame'].append( int( bin_centers_frames[i_bin] ) )
+
+            ret = pd.DataFrame.from_dict( ret_dict )
+
+            for k in dataset_keys:
+                ret[k] = dataset[k]
+
+            for k in header_keys:
+                ret[k] = header[k][0, 0]
+
+    #         if postprocess:
+    #             _postprocess( ret, self.__event_postprocessors )
+
+            return header, ret
     
-    def iter_dataset_events( self, dataset_keys = None ):
+        # Unknown output format
+        raise Exception( f'Unknown output format: {output}' )
+    
+    def iter_dataset_events( self, **kwargs):
         """Generates an iterator of the form (dataset, header, events) where
         
         dataset - the parsed specification of the current dataset's filename
         header - overall information about the dataset
         events - DataFrame, each row is an astrocyte event
         
-        Keyword arguments:
-        dataset_keys - keys from output of `datasets` to merge into the `events`
-            output (see `load_events`)
+        Keyword arguments are passed through to `load_events`
         """
         
-        return ( (dataset,) + self.load_events( dataset, dataset_keys = dataset_keys )
+        return ( (dataset,) + self.load_events( dataset, **kwargs )
                  for _, dataset in self.datasets.iterrows() )
     
-    def all_events( self, dataset_keys = None, verbose = False ):
+    def iter_dataset_rasters( self, **kwargs ):
+        """Generates an iterator of the form (dataset, header, raster) where
+        
+        dataset - the parsed specification of the current dataset's filename
+        header - overall information about the dataset
+        raster - the raster in the format specified by the `output` kwarg (see `load_raster`):
+            'df' - (Default) `raster` is a DataFrame, where each row is a bin for an individual cell
+            'array' - `raster` is a [cell, bin] numpy array
+            
+        Keyword arguments are passed through to `load_events`
+        """
+        
+        return ( (dataset,) + self.load_raster( dataset, **kwargs )
+                 for _, dataset in self.datasets.iterrows() )
+    
+    def all_events( self,
+                    verbose = False,
+                    **kwargs ):
         """Returns all events for all datasets in the hive (from `iter_dataset_events`)
         concatenated vertically
         
         Returns: (headers, events)
         headers - list of header data from each dataset
-        events - DataFrame, each row is an astrocyte event. A column 'cell_id' is added, which
-            generates a unique identifier for each cell.
+        events - DataFrame, each row is an astrocyte event
         
         Keyword arguments:
-        dataset_keys - keys from output of `datasets` to merge into the `events`
-            output (see `load_events`)
         verbose - if True, prints out the name of each processed file
+        The rest are passed through to `load_events`
         """
         
         headers = []
         ret = None
         
-        # We're going to create a column 'cell_id' that is going to hold the "overall" cell counter
-        cur_cell_overall = 0
-        
-        it = self.iter_dataset_events( dataset_keys = dataset_keys )
+        it = self.iter_dataset_events( **kwargs )
         if verbose:
             it = tqdm( it, total = len( self.datasets ) )
         
@@ -689,126 +926,60 @@ class HiveManager:
             
             headers.append( header )
             
-            events['cell_id'] = events['cell'] + cur_cell_overall
-            
             if ret is None:
                 ret = events
             else:
                 ret = ret.append( events, ignore_index = True )
-            
-            cur_cell_overall += np.max( events['cell'] )
+                
+        postprocess = kwargs.get( 'postprocess', True )
+        if postprocess:
+            _postprocess( ret, self.__all_event_postprocessors )
         
         return headers, ret
     
-#     @property
-#     def iter_rasters( self ):
-#         return (i, load_raster( row ) for i, row in self.)
-
-## Additional parsers
-
-# Example from file format used in Michelle's uncaging data
-
-def _parse_standard_part( part, spec ):
-    ret = dict()
-    
-    spec_kind = spec[0]
-    
-    if spec_kind == 'suffix':
-        # Match against the given suffix
-        suffix = spec[1]
-        if part != suffix:
-            # Suffix does not match; exclude this file
-            return None
-
-    elif spec_kind == 'date':
-        # Extract the date using the given format
-        key = spec[1]
-        date_format = spec[2]
-        ret['date'] = datetime.strptime( part, date_format )
-
-    elif spec_kind == 'raw':
-        # Pull out exactly the string in the part
-        key = spec[1]
-        ret[key] = part
-
-    elif spec_kind == 'number':
-        # Find the desired integer in the part
-        key = spec[1]
-        # Default to first integer
-        index = 0 if len( spec ) < 3 else spec[2]
+    def all_rasters( self,
+                     verbose = False,
+                     **kwargs ):
+        """Returns all rasters for all datasets in the hive (from `iter_dataset_rasters`)
+        concatenated vertically
         
-        numbers = re.findall( '\d+', part )
-        if len( numbers ) == 0:
-            # No number found
-            ret[key] = None
-        else:
-            # Hold onto the desired number
-            ret[key] = int( numbers[index] )
-
-    elif spec_kind == 'switch':
-        # Look for matches against a set of possibilities
-        key = spec[1]
-        labels = spec[2]
+        Returns: (headers, raster)
+        headers - list of header data from each dataset
+        raster - the raster in the format specified by the `output` kwarg:
+            'df' - (Default) `raster` is a DataFrame, where each row is a bin for an individual cell
+            'array' - `raster` is a [cell, bin] numpy array
         
-        match = None
-        for part_label, data_label in labels.items():
-            if part_label in part:
-                match = data_label
-                break
+        Keyword arguments:
+        verbose - if True, prints out the name of each processed file
+        The rest are passed through to `load_events`
+        """
         
-        if match is None:
-            ret[key] = None
-        else:
-            ret[key] = match
+        ## TODO Fix appending for when `output` == 'array'
+        if kwargs.get( 'output', 'df' ) == 'array':
+            raise NotImplementedError( "`all_rasters` not implemented for 'array' output" )
         
-    return ret
-
-def _parse_standard( fn, spec, split ):
-    ret = dict()
-    ret['filename'] = fn
-    
-    # Split name into its parts
-    name, ext = os.path.splitext( fn )
-    name_split = name.split( split )
-    
-    # Label the split parts
-    name_spec = zip( name_split, spec )
-    
-    # Parse each part
-    for cur_part, cur_specs in name_spec:
-        if cur_specs is None:
-            # Ignore this part
-            continue
+        headers = []
+        ret = None
         
-        if type( cur_specs ) != list:
-            # Normalize specs by turning all specs into a list
-            cur_specs = [cur_specs]
+        it = self.iter_dataset_rasters( **kwargs )
+        if verbose:
+            it = tqdm( it, total = len( self.datasets ) )
         
-        for cur_spec in cur_specs:
-            try:
-                cur_parsed = _parse_standard_part( cur_part, cur_spec )
-            except Exception as e:
-                # Failed to parse this part; keep going
-                print( e )
-                continue
+        for dataset, header, raster in it:
+            if verbose:
+                it.set_description( f"Loading {dataset['filename']}..." )
             
-            if cur_parsed is None:
-                # Signal to short-circuit (filter)
-                return None
+            headers.append( header )
             
-            # Add the new information into the record we're building
-            ret.update( cur_parsed )
-    
-    return ret
+            if ret is None:
+                ret = raster
+            else:
+                ret = ret.append( raster, ignore_index = True )
+        
+        postprocess = kwargs.get( 'postprocess', True )
+        if postprocess:
+            _postprocess( ret, self.__all_raster_postprocessors )
+        
+        return headers, ret
 
-def standard_filename_parser( spec, split = '_' ):
-    """Parser that takes individual components by splitting each filename in the hive using
-    a specified separator string
-    
-    Arguments:
-    spec - a list specifying how each part of the filename should be parsed; see examples
-    
-    Keyword arguments:
-    split - string to separate parts of the filename to be processed. Default: '_'
-    """
-    return lambda fn: _parse_standard( fn, spec, split )
+#
