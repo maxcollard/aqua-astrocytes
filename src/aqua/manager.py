@@ -19,9 +19,6 @@ import yaml
 
 from tqdm import tqdm
 
-## Constants
-
-
 
 ## HiveManager helpers
 
@@ -745,7 +742,7 @@ class HiveManager:
         
         return header, ret
     
-    # TODO Break raster computation out of HiveManager; it should be its own thing
+    # TODO (?) Break raster computation out of HiveManager; it should be its own thing
     def load_raster( self, dataset,
                      dataset_keys = None,
                      header_keys = None,

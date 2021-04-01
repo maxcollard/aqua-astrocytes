@@ -81,12 +81,14 @@ def ramp_effects( df, window,
 # TODO Way to properly include propagation?
 _default_pca_keys = [
     'mark_area_log',
+    'mark_circMetric',
     'mark_decayTau_log',
     'mark_dffMax_log',
     'mark_dffMax2_log',
     'mark_fall91_log',
     'mark_nOccurSameLoc_log',
     'mark_nOccurSameLocSize_log',
+    'mark_nOccurSameTime',
     'mark_peri_log',
     'mark_rise19_log',
     'mark_width11_log',
@@ -128,7 +130,7 @@ def event_pca( events,
         return pca
     
     ## Reformat outputs as DataFrames for convenience
-    pc_index = [ f'pc_{i + 1}' for i in range( pca.n_components_ ) ]
+    pc_index = [ f'mark_pc_{i + 1}' for i in range( pca.n_components_ ) ]
     
     # Loadings (loadings)
     loadings = pd.DataFrame( pca.components_,
@@ -153,6 +155,41 @@ def event_pca( events,
         scores.iloc[i_row] = row_score
         
     return loadings, frac_variance, scores
+
+def compare_rates( rf1, rf2, t, n ):
+    """Compare two rate functions `rf1` and `rf2` using `n` iterations of the
+    parametric bootstrap evaluated at `t`.
+    
+    Returns a one-sided pointwise p-value for whether `rf2` is greater than `rf1`
+    """
+    
+    n_t = t.shape[0]
+    
+    # Determine the rate functions at t
+    rt1 = rf1.predict( t )
+    rt2 = rf2.predict( t )
+    
+    rt1_boot = np.zeros( (n, n_t) )
+    rt2_boot = np.zeros( (n, n_t) )
+    is_2_greater_1 = np.zeros( (n, n_t) )
+    for i_boot in range( n ):
+        # Get a sample of the corresponding NHPPs with the given rate functions
+        ts1_boot = _pois_inhom( rt1, t )
+        ts2_boot = _pois_inhom( rt2, t )
+        
+        # Determine the kernel fit for the bootstrapped data
+        rf1_boot = rf1.copy()
+        rf1_boot.fit( ts1_boot )
+        rt1_boot[i_boot, :] = rf1_boot.predict( t )
+        rf2_boot = rf2.copy()
+        rf2_boot.fit( ts2_boot )
+        rt2_boot[i_boot, :] = rf2_boot.predict( t )
+        
+        # Compare the newly fitted data between the two functions
+        is_2_greater_1[i_boot, :] = rt2_boot[i_boot, :] > rt1_boot[i_boot, :]
+        
+    return np.sum( is_2_greater_1, axis = 0 ) / n
+
 
 ## RateFunctionKernel helpers
 
@@ -262,6 +299,8 @@ def _rate_kernel_error_boot_parametric( rt, t, kernel, n_boot, error_kind ):
     
     raise Exception( f"Unknown `error_kind` strategy: '{error_kind_strategy}'" )
 
+## Kernels
+    
 def _standard_kernel_rect( x ):
     return (np.abs(x) <= 1.) * (1 / 2.)
 
@@ -328,40 +367,6 @@ def get_kernel_family( kernel_type ):
     if kernel_type == 'gauss' or kernel_type == 'gaussian' or kernel_type == 'normal':
         return get_kernel_gauss
     raise Exception( f"Unknoen kernel type: '{kernel_type}'" )
-    
-def compare_rates( rf1, rf2, t, n ):
-    """Compare two rate functions `rf1` and `rf2` using `n` iterations of the
-    parametric bootstrap evaluated at `t`.
-    
-    Returns a one-sided pointwise p-value for whether `rf2` is greater than `rf1`
-    """
-    
-    n_t = t.shape[0]
-    
-    # Determine the rate functions at t
-    rt1 = rf1.predict( t )
-    rt2 = rf2.predict( t )
-    
-    rt1_boot = np.zeros( (n, n_t) )
-    rt2_boot = np.zeros( (n, n_t) )
-    is_2_greater_1 = np.zeros( (n, n_t) )
-    for i_boot in range( n ):
-        # Get a sample of the corresponding NHPPs with the given rate functions
-        ts1_boot = _pois_inhom( rt1, t )
-        ts2_boot = _pois_inhom( rt2, t )
-        
-        # Determine the kernel fit for the bootstrapped data
-        rf1_boot = rf1.copy()
-        rf1_boot.fit( ts1_boot )
-        rt1_boot[i_boot, :] = rf1_boot.predict( t )
-        rf2_boot = rf2.copy()
-        rf2_boot.fit( ts2_boot )
-        rt2_boot[i_boot, :] = rf2_boot.predict( t )
-        
-        # Compare the newly fitted data between the two functions
-        is_2_greater_1[i_boot, :] = rt2_boot[i_boot, :] > rt1_boot[i_boot, :]
-        
-    return np.sum( is_2_greater_1, axis = 0 ) / n
     
 ## RateFunction classes
 
