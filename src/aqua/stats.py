@@ -27,9 +27,9 @@ def ramp_effects( df, window,
                   window_key = 'center_time',
                   outcome_key = 'event_count',
                   group_key = 'cell_global',
-                  family = sm.families.Poisson(),
                   p_threshold = 0.05,
-                  verbose = False ):
+                  verbose = False,
+                  **kwargs ):
     """Determine the effect of time in `window` on event rate in the DataFrame raster `df`
     using statsmodels' GLM implementation
     
@@ -40,12 +40,10 @@ def ramp_effects( df, window,
         (Default: 'cell_global')
     window_key - key to use as the independent variable (i.e. "time";
         default: 'center_time')
-    family - the exponential family to model `outcome_key` using
-        (Default: `sm.families.Poisson()`, corresponding to discrete counts)
-        => See https://www.statsmodels.org/stable/glm.html to choose what's right for
-        your application
     p_threshold - p-value threshold for significant ramp effect
     verbose - if True, show a progress bar
+    
+    The rest of the kwargs are passed to `glm`
     """
     
     it = df.groupby( group_key )
@@ -61,9 +59,22 @@ def ramp_effects( df, window,
                           & (group[window_key] < window[1]) )
         group_filtered = group.loc[filter_window]
         
+        if np.sum( group_filtered[outcome_key] ) == 0:
+            # No data in the window; cannot fit model
+            
+            cur_ret['slope'] = None
+            cur_ret['p'] = None
+            cur_ret['slope_low'] = None
+            cur_ret['slope_high'] = None
+
+            cur_ret['effect'] = 'No data'
+            
+            ret_list.append( cur_ret )
+            continue
+        
         ramp_model = smf.glm( formula = f'{outcome_key} ~ {window_key}',
                               data = group_filtered,
-                              family = sm.families.Poisson() )
+                              **kwargs )
         ramp_results = ramp_model.fit()
         
         cur_ret['slope'] = ramp_results.params[window_key]
