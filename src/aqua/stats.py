@@ -593,7 +593,7 @@ class RateFunctionKernel:
 ## KernelRegression helpers
 
 # ...
-    
+
 ## KernelRegression class
 
 class KernelRegression:
