@@ -590,27 +590,285 @@ class RateFunctionKernel:
         
         return r_hat
 
-## LocalRegression class
+## KernelRegression helpers
 
-class LocalRegression:
+# ...
+    
+## KernelRegression class
+
+class KernelRegression:
     
     def __init__( self,
-                  method = 'nw' ):
+                  method = 'nw',
+                  kernel = None,
+                  kernel_family = None ):
+        """Initializes a new kernel regression fit
         
-        # Instance variables
-        self.method = method
+        Default behavior is to use an Epanechnikov kernel with `scale` of 1
+        
+        Keyword arguments:
+        method - the method used to fit the regression model. Options are:
+            'nw' - (Default) Nadaraya-Watson ("locally constant") estimator
+            'local' - Local linear estimator
+        kernel - the specific kernel function to use for fitting, or a tuple specifying a kernel;
+            see `get_kernel`
+        kernel_family - if set, uses this function (with parameter `scale`) to perform cross-validation
+            over the `scale` parameter; alternatively, a string that determines the kernel family
+            (see `get_kernel_family`)
+        """
+        
+        self._method = method
+        
+        if type( kernel_family ) == str:
+            kernel_family = get_kernel_family( kernel_family )
+        self._kernel_family = kernel_family
+        
+        # Placeholder for validated scale; only used if `kernel_family` is set
+        self._scale_cv = None
+        # Kernel will be set if specified, or set when cross-validated in `fit`
+        self._kernel = None
+        
+        if self._kernel_family is None:
+            # Kernel family isn't set; assume we want a specific kernel
+            if kernel is None:
+                # Default kernel is a default Epanechnikov kernel
+                kernel = ('epanechnikov', 1.)
+            if type( kernel ) is tuple:
+                # Passed in a specification rather than a kernel function; decode
+                kernel = get_kernel( *kernel )
+            self._kernel = kernel
+        
+        # Placeholder for the data; needed for `predict` later
+        self._data_input = None
+        self._data_output = None
+        
+        # Placeholder for fit statistics
+        self._fit_stats = None
     
-    def __fit_nw( X, y ):
-        pass
+    def __fit_nw( self,
+                  equal_var = True,
+                  verbose = False,
+                  return_fit = False ):
+        """Fit kernel regression model using Nadaraya-Watson ("locally constant") estimator
+        
+        ...
+        """
+        
+        # Check for immediate errors
+        
+        if equal_var == False:
+            raise NotImplementedError( 'NW fit: Heteroskedastic case not yet implemented' )
+        
+        if self._data_input is None or self._data_output is None:
+            raise Exception( 'NW fit: No fit data provided' )
+        
+        # Use __predict_nw on the fit data
+        # NOTE We vannot get variance yet because we haven't fit the noise variance
+        r_hat_data, _, weights_data = self.__predict_nw( self._data_input,
+                                                         return_weights = True,
+                                                         var = None,
+                                                         verbose = verbose )
+        n_data = weights_data.shape[0]
+        
+        # Temporary object to hold fit stats
+        fit_stats = dict()
+            
+        # Determine effective number of parameters
+        if verbose:
+            print( 'Determining dof...' )
+        
+        # TODO This is EXTREMELY expensive
+        nu = np.trace( weights_data )
+        
+        nu_twiddle = 0.
+        for i in range( n_data ):
+            nu_twiddle += np.sum( np.power( weights_data[i, :], 2. ) )
+        p = nu - nu_twiddle
+        
+        if verbose:
+            print( f'    Effective dof: {nu:0.2f}' )
+            print( f'    Effective p:   {p:0.2f}' )
+            
+        fit_stats['dof'] = nu
+        # TODO Find out proper names for these
+        fit_stats['nu_twiddle'] = nu_twiddle
+        fit_stats['p'] = p
+
+        # Determine estimate of error variance
+#         if verbose:
+#             print( 'Determining error variance...' )
+            
+        residuals = self._data_output - r_hat_data
+        sq_error = np.sum( np.power( residuals, 2. ) )
+        var_hat = sq_error / (n_data - p)
+        
+        fit_stats['sse'] = sq_error
+        fit_stats['error_var_hat'] = var_hat
+        
+        # Compute LOO cross-validation error
+        if verbose:
+            print( 'Computing LOO CV error...' )
+        
+        cv_loo = (1. / n_data) * np.sum( np.power( residuals / (1. - np.diag( weights_data )), 2. ) )
+        fit_stats['cv_loo'] = cv_loo
+        
+        self._fit_stats = pd.Series( fit_stats )
+        
+        if return_fit:
+            # NOW we can determine estimate of variance in regression function estimator
+            var_r_hat_data = __var_nw( weights,
+                                       var_hat = var_hat,
+                                       equal_var = equal_var,
+                                       verbose = verbose )
+            
+            return r_hat_data, var_r_hat_data
     
-    def fit( X, y ):
+    def fit( self, X, y, **kwargs ):
         """[n_samples, n_features]"""
-        pass
+        
+        # Check for immediate errors
+        
+        if self._kernel_family is not None:
+            raise NotImplementedError( 'Automatic cross-validation is not yet implemented' )
+        
+        if self._kernel is None:
+            raise Exception( 'No kernel set or determined' )
+        
+        if len( X.shape ) > 1:
+            if X.shape[1] > 1:
+                raise NotImplementedError( 'NW estimator: Multi-dimensional domain not yet implemented' )
+                
+        if len( y.shape ) > 1:
+            if y.shape[1] > 1:
+                raise NotImplementedError( 'NW estimator: Multiple outputs not yet implemented' )
+        
+        if X.shape[0] != y.shape[0]:
+            raise Exception( 'Input and output must have the same number of samples' )
+        
+        # Cache the data for prediction later
+        
+        self._data_input = X
+        self._data_output = y
+        
+        # Choose the correct method
+        
+        if self._method.lower() == 'nw':
+            return self.__fit_nw( **kwargs )
+        
+        if self._method.lower() == 'local':
+            raise NotImplementedError( "Method 'local' not yet implemented" )
+        
+        raise Exception( f"Unknown fit method: {self._method}" )
     
-    def predict( X ):
-        pass
+    def __var_nw( self, weights,
+                  var_hat = None,
+                  equal_var = True,
+                  verbose = False ):
+        """..."""
+        
+        # Catch early errors
+        
+        if equal_var == False:
+            raise NotImplementedError( 'NW variance: Heteroskedastic case not yet implemented' )
+        
+        if var_hat is None:
+            # Determine error variance from fitted statistics
+            
+            if self._fit_stats is None:
+                raise Exception( 'NW predict: no fit stats for error variance' )
+
+            if 'error_var_hat' not in self._fit_stats:
+                raise Exception( 'NW predict: error variance not in fit stats' )
+
+            var_hat = self._fit_stats['error_var_hat']
+            
+        var_r_hat = var_hat * np.sum( np.power( weights, 2. ), axis = 1 )
+        
+        return var_r_hat
     
-    def fit_predict( X, y ):
-        # TODO Might already predict on X as part of fit
-        self.fit( X, y )
-        return self.predict( X )
+    def __predict_nw( self, X,
+                      return_weights = False,
+                      var = 'equal',
+                      verbose = False ):
+        """..."""
+        
+        # Catch early errors
+        
+        if var is not None and var.lower() != 'equal':
+            raise NotImplementedError( 'NW predict: Heteroskedastic case not yet implemented' )
+        
+        if self._data_input is None or self._data_output is None:
+            raise Exception( 'Nw predict: model not fit' )
+        
+        if len( X.shape ) > 1:
+            if X.shape[1] > 1:
+                warnings.warn( 'NW predict: Input is multi-dimensional; ignoring all but first' )
+                X = X[:, 0]
+        
+        n_data = self._data_input.shape[0]
+        n_predict = X.shape[0]
+        
+        # Determine estimate of regression function
+        denom = np.zeros( (n_predict,) )
+        num = np.zeros( (n_predict,) )
+        weights = np.zeros( (n_predict, n_data) )
+        
+        # We iterate over all of the *fitted data* for doing the kernel estimates
+        it = enumerate( zip( self._data_input, self._data_output ) )
+        if verbose:
+            it = tqdm( it, total = n_predict )
+        
+        for i, (xi, yi) in it:
+            if np.isnan( xi ) or np.isnan( yi ):
+                # TODO Make ignoring NaNs a parameter
+                continue
+
+            # Add influence of kernel centered at fit point i across all predict points
+            Ki = self._kernel( X - xi )
+            denom += Ki
+            num += Ki * yi
+            weights[:, i] = Ki
+            
+        r_hat = num / denom
+        
+        # Divide by denominator in weight matrix
+        # TODO Use np reshape magic to speed up
+        if verbose:
+            print( 'Normalizing hat matrix...' )
+        for i in range( n_data ):
+            weights[:, i] = weights[:, i] / denom
+        
+        if var is None:
+            var_r_hat = None
+        else:
+            # Determine estimate of variance in regression function estimator
+            var_r_hat = self.__var_nw( weights,
+                                       equal_var = True if var.lower() == 'equal' else False,
+                                       verbose = verbose )
+            
+        if return_weights:
+            return r_hat, var_r_hat, weights
+        
+        return r_hat, var_r_hat
+    
+    def predict( self, X, **kwargs ):
+        """..."""
+        
+        # TODO Error checking
+        
+        # Choose the correct method
+        
+        if self._method.lower() == 'nw':
+            return self.__predict_nw( X, **kwargs )
+        
+        if self._method.lower() == 'local':
+            raise NotImplementedError( "Method 'local' not yet implemented" )
+        
+        raise Exception( f"Unknown fit method: ''{self._method}'" )
+        
+    
+#     def fit_predict( self, X, y, **kwargs ):
+#         # TODO Might already predict on X as part of fit
+#         # TODO Different kwargs for fit and predict?
+#         self.fit( X, y, **kwargs )
+#         return self.predict( X )
