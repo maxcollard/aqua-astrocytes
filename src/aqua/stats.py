@@ -655,6 +655,7 @@ class KernelRegression:
         ...
         """
         
+        # TODO Need to figure out better way of filtering out NaNs
         filter_good = ~np.any( np.isnan( weights), axis = 1 )
         
         r_hat_effective = r_hat[filter_good]
