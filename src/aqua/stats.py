@@ -633,9 +633,12 @@ class KernelRegression:
             if kernel is None:
                 # Default kernel is a default Epanechnikov kernel
                 kernel = ('epanechnikov', 1.)
+                
             if type( kernel ) is tuple:
                 # Passed in a specification rather than a kernel function; decode
+                self._kernel_family = kernel[0]
                 kernel = get_kernel( *kernel )
+                
             self._kernel = kernel
         
         # Placeholder for the data; needed for `predict` later
@@ -644,6 +647,98 @@ class KernelRegression:
         
         # Placeholder for fit statistics
         self._fit_stats = None
+    
+    def __stats_linear_smoother( self, r_hat, weights,
+                                 verbose = False ):
+        """Uses the linear smoother weights to determine fit statistics
+        
+        ...
+        """
+        
+        filter_good = ~np.any( np.isnan( weights), axis = 1 )
+        
+        r_hat_effective = r_hat[filter_good]
+        weights_effective = weights[filter_good, :][:, filter_good]
+        
+        n_data = weights_effective.shape[0]
+        
+        # Temporary object to hold fit stats
+        ret = dict()
+            
+        # Determine effective number of parameters
+        if verbose:
+            print( 'Determining dof...' )
+        
+        # TODO This is EXTREMELY expensive
+        nu = np.trace( weights_effective )
+        
+        nu_twiddle = 0.
+        for i in range( n_data ):
+            nu_twiddle += np.sum( np.power( weights_effective[i, :], 2. ) )
+        p = nu - nu_twiddle
+        
+        if verbose:
+            print( f'    Effective dof: {nu:0.2f}' )
+            print( f'    Effective p:   {p:0.2f}' )
+            
+        ret['dof'] = nu
+        # TODO Find out proper names for these
+        ret['nu_twiddle'] = nu_twiddle
+        ret['p'] = p
+
+        # Determine estimate of error variance
+        # (Don't need to log, this is fast)
+#         if verbose:
+#             print( 'Determining error variance...' )
+            
+        residuals = self._data_output[filter_good] - r_hat_effective
+        sq_error = np.sum( np.power( residuals, 2. ) )
+        var_hat = sq_error / (n_data - p)
+        
+        ret['sse'] = sq_error
+        ret['error_var_hat'] = var_hat
+        
+        # Compute LOO cross-validation error
+        if verbose:
+            print( 'Computing LOO CV error...' )
+        
+        cv_loo = (1. / n_data) * np.sum( np.power( residuals / (1. - np.diag( weights_effective )), 2. ) )
+        ret['cv_loo'] = cv_loo
+        
+        return pd.Series( ret )
+    
+    def __fit_local( self,
+                   equal_var = True,
+                   verbose = False,
+                   return_fit = False ):
+        """..."""
+        
+        # Check for immediate errors
+        
+        if equal_var == False:
+            raise NotImplementedError( 'Local fit: Heteroskedastic case not yet implemented' )
+        
+        if self._data_input is None or self._data_output is None:
+            raise Exception( 'Local fit: No fit data provided' )
+            
+        # Use __predict_local on the fit data
+        # NOTE We can't get variance yet because we haven't fit the nosie variance
+        r_hat_data, _, weights_data = self.__predict_local( self._data_input,
+                                                            return_weights = True,
+                                                            var = None,
+                                                            verbose = verbose )
+        
+        self._fit_stats = self.__stats_linear_smoother( r_hat_data, weights_data,
+                                                        verbose = verbose )
+        
+        if return_fit:
+            # NOW we can determine estimate of variance in regression function estimator
+            var_r_hat_data = __var_linear_smoother( weights_data,
+                                                    var_hat = var_hat,
+                                                    equal_var = equal_var,
+                                                    verbose = verbose )
+            
+            return r_hat_data, var_r_hat_data
     
     def __fit_nw( self,
                   equal_var = True,
@@ -663,63 +758,21 @@ class KernelRegression:
             raise Exception( 'NW fit: No fit data provided' )
         
         # Use __predict_nw on the fit data
-        # NOTE We vannot get variance yet because we haven't fit the noise variance
+        # NOTE We can't get variance yet because we haven't fit the noise variance
         r_hat_data, _, weights_data = self.__predict_nw( self._data_input,
                                                          return_weights = True,
                                                          var = None,
                                                          verbose = verbose )
-        n_data = weights_data.shape[0]
         
-        # Temporary object to hold fit stats
-        fit_stats = dict()
-            
-        # Determine effective number of parameters
-        if verbose:
-            print( 'Determining dof...' )
-        
-        # TODO This is EXTREMELY expensive
-        nu = np.trace( weights_data )
-        
-        nu_twiddle = 0.
-        for i in range( n_data ):
-            nu_twiddle += np.sum( np.power( weights_data[i, :], 2. ) )
-        p = nu - nu_twiddle
-        
-        if verbose:
-            print( f'    Effective dof: {nu:0.2f}' )
-            print( f'    Effective p:   {p:0.2f}' )
-            
-        fit_stats['dof'] = nu
-        # TODO Find out proper names for these
-        fit_stats['nu_twiddle'] = nu_twiddle
-        fit_stats['p'] = p
-
-        # Determine estimate of error variance
-#         if verbose:
-#             print( 'Determining error variance...' )
-            
-        residuals = self._data_output - r_hat_data
-        sq_error = np.sum( np.power( residuals, 2. ) )
-        var_hat = sq_error / (n_data - p)
-        
-        fit_stats['sse'] = sq_error
-        fit_stats['error_var_hat'] = var_hat
-        
-        # Compute LOO cross-validation error
-        if verbose:
-            print( 'Computing LOO CV error...' )
-        
-        cv_loo = (1. / n_data) * np.sum( np.power( residuals / (1. - np.diag( weights_data )), 2. ) )
-        fit_stats['cv_loo'] = cv_loo
-        
-        self._fit_stats = pd.Series( fit_stats )
+        self._fit_stats = self.__stats_linear_smoother( r_hat_data, weights_data,
+                                                        verbose = verbose )
         
         if return_fit:
             # NOW we can determine estimate of variance in regression function estimator
-            var_r_hat_data = __var_nw( weights,
-                                       var_hat = var_hat,
-                                       equal_var = equal_var,
-                                       verbose = verbose )
+            var_r_hat_data = __var_linear_smoother( weights_data,
+                                                    var_hat = var_hat,
+                                                    equal_var = equal_var,
+                                                    verbose = verbose )
             
             return r_hat_data, var_r_hat_data
     
@@ -727,9 +780,6 @@ class KernelRegression:
         """[n_samples, n_features]"""
         
         # Check for immediate errors
-        
-        if self._kernel_family is not None:
-            raise NotImplementedError( 'Automatic cross-validation is not yet implemented' )
         
         if self._kernel is None:
             raise Exception( 'No kernel set or determined' )
@@ -756,14 +806,14 @@ class KernelRegression:
             return self.__fit_nw( **kwargs )
         
         if self._method.lower() == 'local':
-            raise NotImplementedError( "Method 'local' not yet implemented" )
+            return self.__fit_local( **kwargs )
         
         raise Exception( f"Unknown fit method: {self._method}" )
     
-    def __var_nw( self, weights,
-                  var_hat = None,
-                  equal_var = True,
-                  verbose = False ):
+    def __var_linear_smoother( self, weights,
+                               var_hat = None,
+                               equal_var = True,
+                               verbose = False ):
         """..."""
         
         # Catch early errors
@@ -786,6 +836,76 @@ class KernelRegression:
         
         return var_r_hat
     
+    def __predict_local( self, X,
+                         return_weights = False,
+                         var = 'equal',
+                         verbose = False ):
+        """..."""
+        
+        # Catch early errors
+        
+        if var is not None and var.lower() != 'equal':
+            raise NotImplementedError( 'NW predict: Heteroskedastic case not yet implemented' )
+        
+        if self._data_input is None or self._data_output is None:
+            raise Exception( 'Nw predict: model not fit' )
+        
+        if len( X.shape ) > 1:
+            if X.shape[1] > 1:
+                warnings.warn( 'NW predict: Input is multi-dimensional; ignoring all but first' )
+                X = X[:, 0]
+        
+        # Determine predictions
+        
+        n_data = self._data_input.shape[0]
+        n_predict = X.shape[0]
+        
+        # TODO This uses the actual matrix equations to determine weights
+        weights = np.zeros( (n_predict, n_data) )
+        
+        it = range( n_predict )
+        if verbose:
+            it = tqdm( it, total = n_predict )
+            
+        # TODO We're not handling nan values correctly here!
+            
+        for i in it:
+            
+            xi = X[i]
+            
+            # i is indexing over *prediction points*
+            # j is denoting *data points*
+            
+            # Determine kernel weighting of data centered at x
+            dxj = self._data_input - xi
+            Kj = self._kernel( dxj )
+            
+            # Determine hat matrix weights
+            s2 = np.sum( Kj * np.power( dxj, 2. ) )
+            s1 = np.sum( Kj * dxj )
+            bj = Kj * (s2 - dxj * s1)
+            
+            weights[i, :] = bj / np.sum( bj )
+        
+        # Weight matrix is a linear smoother on the data
+        if verbose:
+            print( 'Making linear prediction' )
+        r_hat = weights @ self._data_output
+            
+        # Determine variance
+        if var is None:
+            var_r_hat = None
+        else:
+            # Determine estimate of variance in regression function estimator
+            var_r_hat = self.__var_linear_smoother( weights,
+                                                    equal_var = True if var.lower() == 'equal' else False,
+                                                    verbose = verbose )
+            
+        if return_weights:
+            return r_hat, var_r_hat, weights
+        
+        return r_hat, var_r_hat
+    
     def __predict_nw( self, X,
                       return_weights = False,
                       var = 'equal',
@@ -805,6 +925,8 @@ class KernelRegression:
                 warnings.warn( 'NW predict: Input is multi-dimensional; ignoring all but first' )
                 X = X[:, 0]
         
+        # Determine predictions
+        
         n_data = self._data_input.shape[0]
         n_predict = X.shape[0]
         
@@ -816,12 +938,12 @@ class KernelRegression:
         # We iterate over all of the *fitted data* for doing the kernel estimates
         it = enumerate( zip( self._data_input, self._data_output ) )
         if verbose:
-            it = tqdm( it, total = n_predict )
+            it = tqdm( it, total = n_data )
         
         for i, (xi, yi) in it:
             if np.isnan( xi ) or np.isnan( yi ):
                 # TODO Make ignoring NaNs a parameter
-                continue
+                weights[:, i] = np.nan
 
             # Add influence of kernel centered at fit point i across all predict points
             Ki = self._kernel( X - xi )
@@ -838,13 +960,14 @@ class KernelRegression:
         for i in range( n_data ):
             weights[:, i] = weights[:, i] / denom
         
+        # Determine variance
         if var is None:
             var_r_hat = None
         else:
             # Determine estimate of variance in regression function estimator
-            var_r_hat = self.__var_nw( weights,
-                                       equal_var = True if var.lower() == 'equal' else False,
-                                       verbose = verbose )
+            var_r_hat = self.__var_linear_smoother( weights,
+                                                    equal_var = True if var.lower() == 'equal' else False,
+                                                    verbose = verbose )
             
         if return_weights:
             return r_hat, var_r_hat, weights
@@ -862,7 +985,7 @@ class KernelRegression:
             return self.__predict_nw( X, **kwargs )
         
         if self._method.lower() == 'local':
-            raise NotImplementedError( "Method 'local' not yet implemented" )
+            return self.__predict_local( X, **kwargs )
         
         raise Exception( f"Unknown fit method: ''{self._method}'" )
         
