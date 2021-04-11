@@ -716,10 +716,10 @@ class KernelRegression:
         
         if return_fit:
             # NOW we can determine estimate of variance in regression function estimator
-            var_r_hat_data = __var_nw( weights,
-                                       var_hat = var_hat,
-                                       equal_var = equal_var,
-                                       verbose = verbose )
+            var_r_hat_data = self.__var_nw( weights_data,
+                                            var_hat = var_hat,
+                                            equal_var = equal_var,
+                                            verbose = verbose )
             
             return r_hat_data, var_r_hat_data
     
@@ -733,14 +733,6 @@ class KernelRegression:
         
         if self._kernel is None:
             raise Exception( 'No kernel set or determined' )
-        
-        if len( X.shape ) > 1:
-            if X.shape[1] > 1:
-                raise NotImplementedError( 'NW estimator: Multi-dimensional domain not yet implemented' )
-                
-        if len( y.shape ) > 1:
-            if y.shape[1] > 1:
-                raise NotImplementedError( 'NW estimator: Multiple outputs not yet implemented' )
         
         if X.shape[0] != y.shape[0]:
             raise Exception( 'Input and output must have the same number of samples' )
@@ -792,6 +784,8 @@ class KernelRegression:
                       verbose = False ):
         """..."""
         
+        use_1d = True
+        
         # Catch early errors
         
         if var is not None and var.lower() != 'equal':
@@ -801,9 +795,15 @@ class KernelRegression:
             raise Exception( 'Nw predict: model not fit' )
         
         if len( X.shape ) > 1:
-            if X.shape[1] > 1:
-                warnings.warn( 'NW predict: Input is multi-dimensional; ignoring all but first' )
+            if X.shape[1] == 1:
+                # Make life easier by flattening the data
                 X = X[:, 0]
+            if X.shape[1] > 1:
+                # Don't assume we can use the 1d speedup
+                # TODO Vectorize higher-dimensional data
+                use_1d = False
+                
+        # TODO Check number of dimensions for fit and predict data
         
         n_data = self._data_input.shape[0]
         n_predict = X.shape[0]
@@ -816,15 +816,18 @@ class KernelRegression:
         # We iterate over all of the *fitted data* for doing the kernel estimates
         it = enumerate( zip( self._data_input, self._data_output ) )
         if verbose:
-            it = tqdm( it, total = n_predict )
+            it = tqdm( it, total = n_data )
         
         for i, (xi, yi) in it:
-            if np.isnan( xi ) or np.isnan( yi ):
+            if np.sum( np.isnan( xi ) ) > 0 or np.sum( np.isnan( yi ) ) > 0:
                 # TODO Make ignoring NaNs a parameter
                 continue
 
             # Add influence of kernel centered at fit point i across all predict points
-            Ki = self._kernel( X - xi )
+            if use_1d:
+                Ki = self._kernel( X - xi )
+            else:
+                Ki = np.array( [self._kernel( Xi - xi ) for Xi in X] )
             denom += Ki
             num += Ki * yi
             weights[:, i] = Ki
