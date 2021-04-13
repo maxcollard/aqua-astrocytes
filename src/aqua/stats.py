@@ -21,6 +21,9 @@ from sklearn.decomposition import PCA
 
 from tqdm import tqdm
 
+import multiprocessing as mp
+import functools
+
 ## General analyses
 
 def ramp_effects( df, window,
@@ -745,7 +748,8 @@ class KernelRegression:
     def __fit_nw( self,
                   equal_var = True,
                   verbose = False,
-                  return_fit = False ):
+                  return_fit = False,
+                  workers = None ):
         """Fit kernel regression model using Nadaraya-Watson ("locally constant") estimator
         
         ...
@@ -764,7 +768,8 @@ class KernelRegression:
         r_hat_data, _, weights_data = self.__predict_nw( self._data_input,
                                                          return_weights = True,
                                                          var = None,
-                                                         verbose = verbose )
+                                                         verbose = verbose,
+                                                         workers = workers )
         
         self._fit_stats = self.__stats_linear_smoother( r_hat_data, weights_data,
                                                         verbose = verbose )
@@ -904,7 +909,8 @@ class KernelRegression:
     def __predict_nw( self, X,
                       return_weights = False,
                       var = 'equal',
-                      verbose = False ):
+                      verbose = False,
+                      workers = None ):
         """..."""
         
         use_1d = True
@@ -938,24 +944,67 @@ class KernelRegression:
         num = np.zeros( (n_predict,) )
         weights = np.zeros( (n_predict, n_data) )
         
-        # We iterate over all of the *fitted data* for doing the kernel estimates
-        it = enumerate( zip( self._data_input, self._data_output ) )
-        if verbose:
-            it = tqdm( it, total = n_data )
+#         Original method
+#         # We iterate over all of the *fit data* for doing the kernel estimates
+#         it = enumerate( zip( self._data_input, self._data_output ) )
+#         if verbose:
+#             it = tqdm( it, total = n_data )
         
-        for i, (xi, yi) in it:
-            if np.sum( np.isnan( xi ) ) > 0 or np.sum( np.isnan( yi ) ) > 0:
-                # TODO Make ignoring NaNs a parameter
-                weights[:, i] = np.nan
+#         for i, (xi, yi) in it:
+#             if np.sum( np.isnan( xi ) ) > 0 or np.sum( np.isnan( yi ) ) > 0:
+#                 # TODO Make ignoring NaNs a parameter
+#                 weights[:, i] = np.nan
 
-            # Add influence of kernel centered at fit point i across all predict points
-            if use_1d:
-                Ki = self._kernel( X - xi )
-            else:
-                Ki = np.array( [self._kernel( Xi - xi ) for Xi in X] )
-            denom += Ki
-            num += Ki * yi
-            weights[:, i] = Ki
+#             # Add influence of kernel centered at fit point i across all predict points
+#             if use_1d:
+#                 Ki = self._kernel( X - xi )
+#             else:
+#                 Ki = np.array( [self._kernel( Xi - xi ) for Xi in X] )
+#             denom += Ki
+#             num += Ki * yi
+#             weights[:, i] = Ki
+    
+        if workers is None:
+            # Non-parallel version
+            
+            it = enumerate( zip( self._data_input, self._data_output ) )
+            if verbose:
+                it = tqdm( it, total = n_data )
+                
+            for i, datum in it:
+                cur_num, cur_denom = _predict_nw_single_step( self._kernel, X, datum,
+                                                              use_1d = use_1d )
+                
+                num += cur_num
+                denom += cur_denom
+                weights[:, i] = cur_denom
+                
+        else:
+            # Parallel version
+            
+            data = zip( self._data_input, self._data_output )
+            # We partially apply _predict_nw_single_step with everything except the datum
+            map_func = functools.partial( _predict_nw_single_step,
+                                          self._kernel,
+                                          X,
+                                          use_1d = use_1d )
+            
+            # Tack on tqdm for verbose version
+            it = enumerate( _xmap( map_func,
+                                   data,
+                                   chunksize = 100,
+                                   processes = workers ) )
+#             if verbose:
+#                 it = tqdm( it, total = n_data )
+            
+            print( 'Before next' )
+            print( next( it ) )
+            print( 'After next' )
+            
+#             for i, (cur_num, cur_denom) in list( it ):
+#                 num += cur_num
+#                 denom += cur_denom
+#                 weights[:, i] = cur_denom
             
         r_hat = num / denom
         
@@ -1001,3 +1050,59 @@ class KernelRegression:
 #         # TODO Different kwargs for fit and predict?
 #         self.fit( X, y, **kwargs )
 #         return self.predict( X )
+
+# TODO This is an EXTREME HACK for this to work
+# From https://medium.com/@yasufumy/python-multiprocessing-c6d54107dd55
+
+# TODO This is hella broken
+
+_xmap_func = None
+
+def _xmap_worker_init( func ):
+    print( 'Initializing worker' )
+    global _xmap_func
+    _xmap_func = func
+    print( _xmap_func( (np.array( [0, 0] ), 4.) ) )
+
+def _xmap_worker( x ):
+    print( 'Running worker' )
+    return _xmap_func( x )
+
+def _xmap( func, iterable,
+           chunksize = 1,
+           processes = None ):
+    with mp.Pool( processes,
+                  initializer = _xmap_worker_init,
+                  initargs = (func,) ) as pool:
+        return pool.imap( _xmap_worker, iterable, chunksize )
+
+def _predict_nw_single_step( kernel, domain, datum,
+                             use_1d = True ):
+    
+#     print( 'Predicting...' )
+    
+    # Unpack tuple
+    xi, yi = datum
+    
+#     print( xi )
+#     print( yi )
+    
+    if np.sum( np.isnan( xi ) ) > 0 or np.sum( np.isnan( yi ) ) > 0:
+        return (np.nan * np.ones( domain.shape[0] ),
+                np.nan * np.ones( domain.shape[0] ))
+    
+    # Add influence of kernel centered at fit point i across all predict points
+    if use_1d:
+        Ki = kernel( domain - xi )
+    else:
+        Ki = np.array( [kernel( Xi - xi ) for Xi in domain] )
+    
+#     print( Ki )
+    
+    denom = Ki
+    num = Ki * yi
+#     weights[:, i] = Ki
+
+#     print( 'Done predicting' )
+
+    return num, denom
