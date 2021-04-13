@@ -845,14 +845,14 @@ class KernelRegression:
         # Catch early errors
         
         if var is not None and var.lower() != 'equal':
-            raise NotImplementedError( 'NW predict: Heteroskedastic case not yet implemented' )
+            raise NotImplementedError( 'Local predict: Heteroskedastic case not yet implemented' )
         
         if self._data_input is None or self._data_output is None:
-            raise Exception( 'Nw predict: model not fit' )
+            raise Exception( 'Local predict: model not fit' )
         
         if len( X.shape ) > 1:
             if X.shape[1] > 1:
-                warnings.warn( 'NW predict: Input is multi-dimensional; ignoring all but first' )
+                warnings.warn( 'Local predict: Input is multi-dimensional; ignoring all but first' )
                 X = X[:, 0]
         
         # Determine predictions

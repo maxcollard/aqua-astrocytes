@@ -556,6 +556,7 @@ class HiveManager:
 
         # Add long transforms
         log_keys = ['mark_area',
+                    'mark_circMetric',
                     'mark_decayTau',
                     'mark_dffMax',
                     'mark_dffMax2',
