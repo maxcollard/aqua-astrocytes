@@ -903,7 +903,7 @@ class HiveManager:
         concatenated vertically
         
         Returns: (headers, events)
-        headers - list of header data from each dataset
+        headers - dict of header data from each dataset, keyed by `dataset_id`
         events - DataFrame, each row is an astrocyte event
         
         Keyword arguments:
@@ -911,7 +911,7 @@ class HiveManager:
         The rest are passed through to `load_events`
         """
         
-        headers = []
+        headers = dict()
         ret = None
         
         it = self.iter_dataset_events( **kwargs )
@@ -922,7 +922,7 @@ class HiveManager:
             if verbose:
                 it.set_description( f"Loading {dataset['filename']}..." )
             
-            headers.append( header )
+            headers[dataset['dataset_id']] = header
             
             if ret is None:
                 ret = events
@@ -942,7 +942,7 @@ class HiveManager:
         concatenated vertically
         
         Returns: (headers, raster)
-        headers - list of header data from each dataset
+        headers - dict of header data from each dataset, keyed by `dataset_id`
         raster - the raster in the format specified by the `output` kwarg:
             'df' - (Default) `raster` is a DataFrame, where each row is a bin for an individual cell
             'array' - `raster` is a [cell, bin] numpy array
@@ -956,7 +956,7 @@ class HiveManager:
         if kwargs.get( 'output', 'df' ) == 'array':
             raise NotImplementedError( "`all_rasters` not implemented for 'array' output" )
         
-        headers = []
+        headers = dict()
         ret = None
         
         it = self.iter_dataset_rasters( **kwargs )
@@ -967,7 +967,7 @@ class HiveManager:
             if verbose:
                 it.set_description( f"Loading {dataset['filename']}..." )
             
-            headers.append( header )
+            headers[dataset['dataset_id']] == header
             
             if ret is None:
                 ret = raster
