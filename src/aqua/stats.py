@@ -24,6 +24,67 @@ from tqdm import tqdm
 import multiprocessing as mp
 import functools
 
+
+## General statistics
+
+def perm_stat( xs, ys, f,
+               n = 1000,
+               paired = False ):
+    """Statistic `f` (a function taking the two datasets as arguments) quantifying
+    the difference between data in `xs` and data in `ys`, computed in an imposed
+    permuted null hypothesis
+    
+    Keyword arguments:
+    n - the number of permutations
+    paired - whether to treat the observations in `xs` and `ys` as paired when permuting
+        (In the paired case, data points are randomly "flipped" between the categories x and y while
+        maintaining the pairings of individual data points.)
+    """
+    
+    if paired:
+        if len( xs ) != len( ys ):
+            raise ValueError( 'Must have equal groups for paired observations' )
+    
+    ret = np.zeros( (n,) )
+    
+    for i in range( n ):
+        if paired:
+            flip = np.random.randint( 2, xs.shape )
+            xs_cur = np.zeros( xs.shape )
+            ys_cur = np.zeros( ys.shape )
+            xs_cur[flip == 0] = xs[flip == 0]
+            xs_cur[flip == 1] = ys[flip == 1]
+            ys_cur[flip == 0] = ys[flip == 0]
+            ys_cur[flip == 1] = xs[flip == 1]
+        else:
+            combined_data = np.r_[xs, ys]
+            combined_data = np.random.permutation( combined_data )
+            xs_cur = combined_data[:len( xs )]
+            ys_cur = combined_data[len( xs ):]
+        
+        ret[i] = f( xs_cur, ys_cur )
+    
+    return ret
+
+def boot_stat( xs, f,
+               n = 1000 ):
+    """Statistic `f` (a function taking the data as an argument) computed by resampling
+    the data `xs` with replacement
+    
+    Keyword arguments:
+    n - the number of bootstrap samples to compute
+    """
+    
+    n_x = len( xs )
+    
+    boot_values = np.zeros( (n,) )
+    for i_boot in range( n ):
+        sample = np.random.randint( n_x, size = (n_x,) )
+        boot_values[i_boot] = f( xs[sample] )
+    
+    return boot_values
+
+
 ## General analyses
 
 def ramp_effects( df, window,
