@@ -708,7 +708,6 @@ class HiveManager:
                 elif k not in system_keys:
                     header[k] = file[k][:, :]
         
-        n_cells = np.max( event_cells ) + 1
         n_events = len( event_frames )
         
         event_times = None if header['Ts'] is None else header['Ts'] * event_frames
@@ -783,6 +782,10 @@ class HiveManager:
         # TODO Find a way to speed this up when extracting both at the same time
         event_header, events = self.load_events( dataset, dataset_keys = [], postprocess = False )
         
+        # Check if there are cells in this dataset
+        if 'cell' not in events.keys():
+            raise Exception( "Cannot form a raster without 'cell' key present" )
+
         # Copy over the event headers
         header = dict()
         header.update( event_header )
