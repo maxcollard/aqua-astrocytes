@@ -84,6 +84,14 @@ def boot_stat( xs, f,
     
     return boot_values
 
+def ecdf( data, xs ):
+    """Returns the empirical cdf of `data` evaluated at `xs`"""
+    
+    ret = np.zeros( xs.shape )
+    for i, x in enumerate( xs ):
+        ret[i] = np.sum( data < x ) / np.size( data )
+    return ret
+    
 
 ## General analyses
 
