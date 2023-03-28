@@ -66,13 +66,72 @@ def perm_stat( xs, ys, f,
     
     return ret
 
+def circ_shift( xs, dx, window ):
+    "Shift `xs` by `dx`, constrained to lie within [`window[0]`, window[1])"
+    
+    dw = window[1] - window[0] # The size of the window
+    ret = xs - window[0] # Adjust so that window starts at x = 0
+    ret = ret + dx # Shift data
+    ret[ret >= dw] = ret[ret >= dw] - dw
+    ret = ret + window[0] # Move the data back to the original time base
+    return ret
+
+def circ_shift_groups_random( df, window,
+                              shift_key = 'start_time_rel',
+                              group_key = 'cell_global_all' ):
+    "Shift the events in `df` independently for each group in `group_key`"
+    
+    ret = df.copy()
+    
+    for group in ret[group_key].unique():
+        filter_group = ret[group_key] == group
+        dx = np.random.uniform( window[1] - window[0] )
+        ret.loc[filter_group, shift_key] = circ_shift( ret.loc[filter_group, shift_key], dx, window )
+    
+    return ret
+
+def perm_stat_df( df_x, df_y, f, n = 1000, verbose = False ):
+    """Statistic `f` (a function taking the two datasets as arguments) quantifying
+    the difference between data in `df_x` and data in `df_y`, computed in an imposed
+    permuted null hypothesis
+    
+    Keyword arguments:
+    n - the number of permutations (default: 1000)
+    verbose - if `True`, print a progress bar (default: False)
+    """
+    
+    label_key = '__perm_label__'
+    
+    df_x_use = df_x.copy()
+    df_y_use = df_y.copy()
+    
+    df_x_use[label_key] = 'x'
+    df_y_use[label_key] = 'y'
+    
+    df_combined = pd.concat( [df_x_use, df_y_use] )
+    
+    it = range( n )
+    if verbose:
+        it = tqdm( it )
+    
+    ret = []
+    for i_perm in it:
+        df_perm = df_combined.copy()
+        df_perm[label_key] = np.random.permutation( df_perm[label_key] )
+        df_x_perm = df_perm[df_perm[label_key] == 'x']
+        df_y_perm = df_perm[df_perm[label_key] == 'y']
+        ret.append( f( df_x_perm, df_y_perm ) )
+    ret = np.array( ret )
+        
+    return ret
+
 def boot_stat( xs, f,
                n = 1000 ):
     """Statistic `f` (a function taking the data as an argument) computed by resampling
     the data `xs` with replacement
     
     Keyword arguments:
-    n - the number of bootstrap samples to compute
+    n - the number of bootstrap samples to compute (default: 1000)
     """
     
     n_x = len( xs )
