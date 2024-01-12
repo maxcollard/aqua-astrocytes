@@ -615,6 +615,7 @@ class HiveManager:
         return ret
     
     def __get_dataset_keys( self, dataset, dataset_keys ):
+        
         ret_dataset = None
         ret_keys = []
         
@@ -732,6 +733,7 @@ class HiveManager:
         ret = pd.DataFrame.from_dict( ret_dict )
         
         for k in dataset_keys:
+#             print( k, dataset[k] )
             ret[k] = dataset[k]
             
         for k in header_keys:
