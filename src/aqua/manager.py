@@ -339,13 +339,16 @@ def _postprocess( df, postprocessors ):
 ## HiveManager class
 
 class HiveManager:
-    """Manages a Pythonized AQuA data hive"""
+    """
+    Manages a Pythonized AQuA data hive
+    """
     
     def __init__( self, path,
                   parser = None,
                   all_manual = False,
                   extension = '.mat' ):
-        """Initializes a hive for the given path
+        """
+        Initializes a hive for the given path
         
         Arguments:
         path - The base directory of the hive (relative or absolute)
@@ -932,7 +935,9 @@ class HiveManager:
             if ret is None:
                 ret = events
             else:
-                ret = ret.append( events, ignore_index = True )
+                # DataFrame.append was removed
+                # ret = ret.append( events, ignore_index = True )
+                ret = pd.concat( [ret, events], ignore_index = True )
                 
         postprocess = kwargs.get( 'postprocess', True )
         if postprocess:
