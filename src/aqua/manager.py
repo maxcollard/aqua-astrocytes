@@ -5,11 +5,22 @@ For details of AQuA for Matlab, see https://github.com/yu-lab-vt/AQuA
 
 ## Imports
 
+from typing import (
+    Union,
+    Optional,
+    Any,
+)
+from pandas import (
+    DataFrame,
+    Series,
+)
+from numpy.typing import (
+    NDArray,
+)
+
 import os
 from datetime import datetime
-import itertools
 import re
-from collections import OrderedDict
 
 import numpy as np
 import pandas as pd
@@ -24,11 +35,22 @@ from tqdm import tqdm
 
 # Filename parsers
 
-def default_filename_parser( fn ):
-    """Parses a filename to a dict that only contains the filename under the key 'filename'"""
+def default_filename_parser(
+        fn: str,
+    ) -> dict:
+    """
+    Parses a filename `fn` to a dict that only contains the filename under the key 'filename'
+    """
     return { 'filename': fn }
 
-def _parse_standard_part( part, spec ):
+def _parse_standard_part(
+        part: str,
+        spec: tuple,
+    ) -> dict:
+    """
+    TODO
+    """
+
     ret = dict()
     
     spec_kind = spec[0]
@@ -83,7 +105,15 @@ def _parse_standard_part( part, spec ):
         
     return ret
 
-def _parse_standard( fn, spec, split ):
+def _parse_standard(
+        fn: str,
+        spec, # TODO Type annotation
+        split: str,
+    ) -> 'dict[str, Any]':
+    """
+    TODO
+    """
+
     ret = dict()
     ret['filename'] = fn
     
@@ -121,91 +151,136 @@ def _parse_standard( fn, spec, split ):
     
     return ret
 
-def get_standard_filename_parser( spec, split = '_' ):
-    """Parser that takes individual components by splitting each filename in the hive using
-    a specified separator string
+def get_standard_filename_parser(
+        spec: list,
+        split: str = '_',
+    ): # TODO Create shortcut output function type
+    """
+    Parser that makes individual components by splitting filenames using `split` and passing them to the steps in `spec`
     
-    Arguments:
-    spec - a list specifying how each part of the filename should be parsed; see examples
+    Parameters
+    ----------
+    spec : list
+        how each part of the filename should be parsed (TODO: Add examples)
+    split : str (optional)
+        string to separate parts of the filename to be processed. (Default: '_')
     
-    Keyword arguments:
-    split - string to separate parts of the filename to be processed. Default: '_'
+    Returns
+    -------
+    TODO
     """
     return lambda fn: _parse_standard( fn, spec, split )
 
 # Postprocessors
 
-def _postprocess_index( df,
-                        f = lambda i: i + 1,
-                        dtype = int ):
+def _postprocess_index(
+        df: DataFrame,
+        f = lambda i: i + 1, # TODO Shortcut for type annotation
+        dtype = int
+    ) -> NDArray:
+    """
+    Template function returned by `get_index_postprocessor`
+    """
     ret = np.zeros( df.shape[0], dtype = dtype )
     for i_row, i in enumerate( df.index ):
         ret[i_row] = f( i )
     return ret
 
 # TODO Can easily combine this with get_map_postprocessor
-def get_index_postprocessor( **kwargs ):
-    """Maps the function given as `f` over the index of each row
-    Default: `f` turns the zero-indexing in df's index into a one-indexed id; i.e.,
+def get_index_postprocessor(
+        **kwargs
+    ): # TODO Shortcut for return function type
+    """
+    Maps the function given as `f` over the index of each row
+    
+    Default behavior:
+    `f` turns the zero-indexing in df's index into a one-indexed id; i.e.,
         f = lambda i: i + 1
     
-    Keyword arguments:
-    dtype - explicit data type of the return value of `f` (Default: int)
+    Parameters
+    ----------
+    dtype
+        explicit data type of the return value of `f` (Default: int)
+
+    Returns
+    -------
+    TODO
     """
     return lambda df: _postprocess_index( df, **kwargs)
 
-def _postprocess_map( df, f, dtype = float ):
+def _postprocess_map(
+        df: DataFrame,
+        f, # TODO Shortcut for function type annotation
+        dtype = float, # TODO Type annotation for dtypes
+    ) -> NDArray:
+    """
+    Template function returned by `get_map_postprocessor`
+    """
     ret = np.zeros( df.shape[0], dtype = dtype )
     for i_row, row in df.iterrows():
         ret = f( row )
     return ret
 
-def get_map_postprocessor( f, **kwargs ):
+def get_map_postprocessor(
+        f, # TODO Shortcut for function type
+        **kwargs
+    ): # TODO Shortcut for function type
     """Maps the function `f` over each row
     
-    Keyword arguments:
-    dtype - explicit data type of the return value of `f` (Default: float)
+    Parameters
+    ----------
+    dtype
+        explicit data type of the return value of `f` (Default: float)
     """
     return lambda df: _postprocess_map( df, **kwargs )
 
-def _postprocess_coreg( df, coreg_keys ):
+def _postprocess_coreg(
+        df: DataFrame,
+        coreg_keys, # TODO Shortcut for sequence type that can be coerced to list
+    ) -> NDArray:
+    """
+    Template function returned by `get_coreg_postprocessor`
+    """
     ret = np.zeros( df.shape[0], dtype = int )
     for i_group, (group_idx, group_slice) in enumerate( df.groupby( list( coreg_keys ) ) ):
         ret[group_slice.index] = i_group + 1
     return ret
 
 def get_coreg_postprocessor( coreg_keys ):
-    """Gives a unique identifier to each combination of values in `coreg_keys`"""
+    """
+    Gives a unique identifier to each combination of values in `coreg_keys`
+    """
     return lambda df: _postprocess_coreg( df, coreg_keys )
 
-def _postprocess_label( df, labels ):
+def _postprocess_label(
+        df: DataFrame,
+        labels: DataFrame,
+    ) -> list:
+    """
+    Template function returned by `get_label_postprocessor`
+    """
+
     # TODO This is pretty slow
     
     df_labels = []
     for i_row, row in df.iterrows():
         
-#         print( f'{row}' )
-        
         # Determine which label matches
         cur_label = None
         for i_label, label in labels.iterrows():
-#             print( f'Label {i_label}' )
             does_match = True
             for k in label.keys():
                 if k == 'label':
                     # We don't try to match the 'label' key because this is special
                     continue
                 if k not in row.keys():
-#                     print( f'{k} Label key not in datum' )
                     does_match = False
                     break
                 if row[k] != label[k]:
-#                     print( f'{k}: Label value does not match datum value' )
                     does_match = False
                     break
             
             if does_match:
-#                 print( 'Match found!' )
                 # This label matches; set current label to this value
                 cur_label = label['label']
                 break
@@ -214,19 +289,34 @@ def _postprocess_label( df, labels ):
     
     return df_labels
 
-def get_label_postprocessor( labels ):
-    """Returns a postprocessor df -> df_labels that assigns the first value of the 'label'
+def get_label_postprocessor(
+        labels
+    ): # TODO Shortcut for return function type
+    """
+    Returns a postprocessor df -> df_labels that assigns the first value of the 'label'
     field in `labels` that matches a query for the rest of the keys in `labels` when applied
     to `df`.
     """
     return lambda df: _postprocess_label( df, labels )
 
-def load_labels( fn, key ):
-    """Loads a YAML label file to be used with `get_label_postprocessor`
+def load_labels(
+        fn: str,
+        key: str,
+    ) -> DataFrame:
+    """
+    Loads a YAML label file to be used with `get_label_postprocessor`
     
-    Arguments:
-    fn - Filename for the label YAML file; see example
-    key - Key in the 'labels' section to be used for this particular labeler
+    Parameters
+    ----------
+    fn : str
+        Filename for the label YAML file; see example
+    key : str
+        Key in the 'labels' section to be used for this particular labeler
+    
+    Returns
+    -------
+    DataFrame
+        TODO
     """
     # Load the raw data for the YAML labels
     with open( fn, 'r' ) as file:
@@ -240,7 +330,15 @@ def load_labels( fn, key ):
     # Turn into a DataFrame
     return pd.DataFrame( ret_raw )
 
-def _postprocess_conditional( df, key, spec ):
+def _postprocess_conditional(
+        df: DataFrame,
+        key: str,
+        spec: 'dict[str, str]',
+    ) -> NDArray:
+    """
+    Template function returned by `get_conditional_postprocessor`
+    """
+
     # TODO This is *EXTREMELY* slow
     
     if key not in df.keys():
@@ -264,20 +362,37 @@ def _postprocess_conditional( df, key, spec ):
     
     return ret
 
-def get_conditional_postprocessor( key, spec ):
-    """The value in the `key` column determines which column in `spec` is used
+def get_conditional_postprocessor(
+        key: str,
+        spec: 'dict[str, str]',
+    ): # TODO Shortcut for function type of return
+    """
+    The value in the `key` column determines which column in `spec` is used
     
-    Arguments:
-    key - the key being used as the "switch" for conditional labeling
-    spec - a dict of form `value` -> `column`, where `value` is a value of the `key` column and
+    Parameters
+    ----------
+    key
+        the key being used as the "switch" for conditional labeling
+    spec
+        a dict of form `value` -> `column`, where `value` is a value of the `key` column and
         `column` is the corresponding column to use for that row
+    
+    Returns
+    -------
+    TODO
     """
     return lambda df: _postprocess_conditional( df, key, spec )
 
-def _postprocess_transform( df, key,
-                            invert = False,
-                            binarize = False,
-                            log = False ):
+def _postprocess_transform(
+        df: DataFrame,
+        key: str,
+        invert: bool = False,
+        binarize: bool = False,
+        log: bool = False,
+    ): # TODO Ambiguity in return type, harmonize
+    """
+    Template function returned by `get_transform_postprocessor`
+    """
     
     if key not in df.keys():
         return None
@@ -304,29 +419,43 @@ def _postprocess_transform( df, key,
     # Do not binarize or log-transform
     return cur_data
 
-def get_transform_postprocessor( key,
-                                 invert = False,
-                                 binarize = False,
-                                 log = False ):
+def get_transform_postprocessor(
+        key: str,
+        invert: bool = False,
+        binarize: bool = False,
+        log: bool = False,
+    ): # TODO Shortcut for function type of return value
     """Transform the values in the `key` column
     
     NOTE That if no keyword flags are set the `key` column will be returned unaltered
     
-    Arguments:
-    key - the column in the DataFrame to transform
-    
-    Keyword flags:
-    invert - take the negative of the data
-    binarize - return 1.0 if the data is > 0 and 0.0 otherwise; short-circuits log
-    log - take the base-10 logarithm of the data
+    Parameters
+    ----------
+    key : str
+        the column in the DataFrame to transform
+    invert : bool (optional)
+        take the negative of the data (default: `False`)
+    binarize : bool (optional)
+        return 1.0 if the data is > 0 and 0.0 otherwise; short-circuits log
+        (default: `False`)
+    log : bool (optional)
+        take the base-10 logarithm of the data (default: `False`)
     """
-    return lambda df: _postprocess_transform( df, key,
-                                              invert = invert,
-                                              binarize = binarize,
-                                              log = log )
+    return lambda df: _postprocess_transform(
+        df,
+        key,
+        invert = invert,
+        binarize = binarize,
+        log = log,
+    )
 
-def _postprocess( df, postprocessors ):
-    """Add columns (in place) defined by postprocessor functions"""
+def _postprocess(
+        df: DataFrame,
+        postprocessors: list # TODO Add postprocessor type annotation function shortcut
+    ) -> None:
+    """
+    Add columns (in place) defined by postprocessor functions
+    """
     for key, postprocessor in postprocessors:
         result = postprocessor( df )
         
@@ -343,22 +472,27 @@ class HiveManager:
     Manages a Pythonized AQuA data hive
     """
     
-    def __init__( self, path,
-                  parser = None,
-                  all_manual = False,
-                  extension = '.mat' ):
+    def __init__(
+            self,
+            path: str,
+            parser: Optional[Any] = None, #  TODO Add function type annotation
+            all_manual: bool = False,
+            extension: str = '.mat'
+        ):
         """
         Initializes a hive for the given path
         
-        Arguments:
-        path - The base directory of the hive (relative or absolute)
-        
-        Keyword arguments:
-        parser - A function of signature str -> dict that takes in a filename from the hive
+        Parameters
+        ----------
+        path : str
+            The base directory of the hive (relative or absolute)
+        parser : TODO (optional)
+            A function of signature str -> dict that takes in a filename from the hive
             and returns the features that are included when constructing the `datasets` property.
             Default: `default_filename_parser`, which just puts the entire filename into a key
             called 'filename'
-        extension - The file extension of the datasets in the hive, including the dot.
+        extension : str (optional)
+            The file extension of the datasets in the hive, including the dot.
             Default: '.mat'
         """
         
@@ -377,8 +511,9 @@ class HiveManager:
         if not all_manual:
             self.add_default_postprocessors()
             
-    def add_default_postprocessors( self ):
-        """Adds a set of default postprocessors that make sense for most applications
+    def add_default_postprocessors( self ) -> None:
+        """
+        Adds a set of default postprocessors that make sense for most applications
         
         This includes:
         ** Dataset postprocessors **
@@ -393,7 +528,10 @@ class HiveManager:
         """
         
         # One-indexed 'dataset_id'
-        self.add_dataset_postprocessor( 'dataset_id', get_index_postprocessor() )
+        self.add_dataset_postprocessor(
+            'dataset_id',
+            get_index_postprocessor()
+        )
         
         # Standard postprocessing on known marks
         self.add_standard_event_postprocessors()
@@ -405,20 +543,32 @@ class HiveManager:
         if len( cur_datasets ) > 0:
             _, first_events = self.load_events( cur_datasets.iloc[0] )
             if 'cell' in first_events.keys():
-                self.add_event_postprocessor( 'cell_global',
-                                              get_coreg_postprocessor( ['dataset_id', 'cell'] ),
-                                              for_all = True )
-                self.add_raster_postprocessor( 'cell_global',
-                                               get_coreg_postprocessor( ['dataset_id', 'cell'] ),
-                                               for_all = True )
+                self.add_event_postprocessor(
+                    'cell_global',
+                    get_coreg_postprocessor( ['dataset_id', 'cell'] ),
+                    for_all = True
+                )
+                self.add_raster_postprocessor(
+                    'cell_global',
+                    get_coreg_postprocessor( ['dataset_id', 'cell'] ),
+                    for_all = True
+                )
     
-    def add_dataset_postprocessor( self, key, postprocessor ):
-        """Add a new dataset postprocessor to the chain / update an existing postprocessor entry
+    def add_dataset_postprocessor(
+            self,
+            key: str,
+            postprocessor, # TODO Function type annotation
+        ) -> None:
+        """
+        Add a new dataset postprocessor to the chain / update an existing postprocessor entry
         
-        Arguments:
-        key - The name of the column created by the postprocessor
-        postprocessor - A function df -> iterable that constructs a new column based on the
-            existing data in the `datasets` DataFrame
+        Parameters
+        ----------
+        key : str
+            The name of the column created by the postprocessor
+        postprocessor
+            A function `DataFrame -> iterable` that constructs a new column based on the
+            existing data in the `datasets` `DataFrame`
         """
         self.__dataset_postprocessors.append( (key, postprocessor) )
     
@@ -428,20 +578,29 @@ class HiveManager:
 #         if key in self.__dataset_postprocessors:
 #             del self.__dataset_postprocessors[key]
     
-    def add_event_postprocessor( self, key, postprocessor,
-                                 for_all = False,
-                                 front = False ):
-        """Add a new event postprocessor to the chain / update an existing postprocessor entry
+    def add_event_postprocessor(
+            self,
+            key: str,
+            postprocessor, # TODO Function type annotation
+            for_all: bool = False,
+            front: bool = False,
+        ) -> None:
+        """
+        Add a new event postprocessor to the chain / update an existing postprocessor entry
         
-        Arguments:
-        key - The name of the column created by the postprocessor
-        postprocessor - A function df -> iterable that constructs a new column based on the
-            existing data in a loaded events DataFrame
-            
-        Keyword arguments:
-        for_all - when True, adds to the list of postprocessors that are executed when data is
-            loaded with `all_events` at the *very end* of loading
-        front - when True, appends the postprocessor to the *front* of the chain
+        Parameters
+        ----------
+        key : str
+            The name of the column created by the postprocessor
+        postprocessor
+            A function `DataFrame -> iterable` that constructs a new column based on the
+            existing data in a loaded events `DataFrame`
+        for_all : bool (optional)
+            when True, adds to the list of postprocessors that are executed when data is
+            loaded with `all_events` at the *very end* of loading (default: `False`)
+        front : bool (optional)
+            when True, appends the postprocessor to the *front* of the chain
+            (default: `False`)
         """
         if for_all:
             if front:
@@ -454,20 +613,29 @@ class HiveManager:
             else:
                 self.__event_postprocessors.append( (key, postprocessor) )
             
-    def add_raster_postprocessor( self, key, postprocessor,
-                                  for_all = False,
-                                  front = False ):
-        """Add a new raster postprocessor to the chain / update an existing postprocessor entry
+    def add_raster_postprocessor(
+            self,
+            key: str,
+            postprocessor, # TODO Function type annotation
+            for_all: bool = False,
+            front: bool = False,
+        ):
+        """
+        Add a new raster postprocessor to the chain / update an existing postprocessor entry
         
-        Arguments:
-        key - the name of the column created by the postprocessor
-        postprocessor - a function df -> iterable that constructs a new column based on the
-            existing data in a loaded raster DataFrame
-            
-        Keyword arguments:
-        for_all - when True, adds to the list of postprocessors that are executed when data is
-            loaded with `all_events` at the *very end* of loading
-        front - when True, appends the postprocessor to the *front* of the chain
+        Parameters
+        ----------
+        key : str
+            the name of the column created by the postprocessor
+        postprocessor
+            a function `DataFrame -> iterable` that constructs a new column based on the
+            existing data in a loaded raster `DataFrame`
+        for_all : bool (optional)
+            when `True`, adds to the list of postprocessors that are executed when data is
+            loaded with `all_events` at the *very end* of loading (default: `False`)
+        front : bool (optional)
+            when `True`, appends the postprocessor to the *front* of the chain
+            (default: `False`)
         """
         if for_all:
             if front:
@@ -486,16 +654,21 @@ class HiveManager:
 #         if key in self.__event_postprocessors:
 #             del self.__event_postprocessors[key]
     
-    def add_laterality_postprocessors( self,
-                                       front = True ):
-        """Convenience method to properly align lateral / medial
+    def add_laterality_postprocessors(
+            self,
+            front: bool = True,
+        ):
+        """
+        Convenience method to properly align lateral / medial
         
         Assumes that the event data have the 'left_right' column with two possible values:
         - 'LM': lateral is on the left, medial on the right
         - 'ML': medial on the left, lateral on the right
         
-        Keyword arguments:
-        front - if True (default) appends these to the *front* of the postprocessing chain
+        Parameters
+        ----------
+        front : bool (optional)
+            if `True` (default) appends these to the *front* of the postprocessing chain
             (this is usually best; the standard pipeline should come *after* these are computed)
         """
         grow_lateral_spec = {
@@ -515,79 +688,127 @@ class HiveManager:
             'ML': 'mark_propShrinkLeft'
         }
         
-        self.add_event_postprocessor( 'mark_propGrowLateral',
-                                      get_conditional_postprocessor( 'left_right', grow_lateral_spec),
-                                      front = front )
-        self.add_event_postprocessor( 'mark_propGrowMedial',
-                                      get_conditional_postprocessor( 'left_right', grow_medial_spec),
-                                      front = front )
-        self.add_event_postprocessor( 'mark_propShrinkLateral',
-                                      get_conditional_postprocessor( 'left_right', shrink_lateral_spec),
-                                      front = front )
-        self.add_event_postprocessor( 'mark_propShrinkMedial',
-                                      get_conditional_postprocessor( 'left_right', shrink_medial_spec),
-                                      front = front )
+        self.add_event_postprocessor(
+            'mark_propGrowLateral',
+            get_conditional_postprocessor(
+                'left_right',
+                grow_lateral_spec,
+            ),
+            front = front,
+        )
+        self.add_event_postprocessor(
+            'mark_propGrowMedial',
+            get_conditional_postprocessor(
+                'left_right',
+                grow_medial_spec
+            ),
+            front = front,
+        )
+        self.add_event_postprocessor(
+            'mark_propShrinkLateral',
+            get_conditional_postprocessor(
+                'left_right',
+                shrink_lateral_spec
+            ),
+            front = front,
+        )
+        self.add_event_postprocessor(
+            'mark_propShrinkMedial',
+            get_conditional_postprocessor(
+                'left_right',
+                shrink_medial_spec
+            ),
+            front = front,
+        )
     
     def add_standard_event_postprocessors( self ):
-        """Add a standard postprocessing pipeline"""
+        """
+        Add a standard postprocessing pipeline
+        """
         
         # Overwrite the "Shrink" marks with their negation (to make them positive)
-        neg_keys = ['mark_propShrinkAnterior',
-                    'mark_propShrinkLeft',
-                    'mark_propShrinkPosterior',
-                    'mark_propShrinkRight',
-                    'mark_propShrinkLateral',
-                    'mark_propShrinkMedial']
+        neg_keys = [
+            'mark_propShrinkAnterior',
+            'mark_propShrinkLeft',
+            'mark_propShrinkPosterior',
+            'mark_propShrinkRight',
+            'mark_propShrinkLateral',
+            'mark_propShrinkMedial'
+        ]
         for k in neg_keys:
-            self.add_event_postprocessor( k, get_transform_postprocessor( k, invert = True ) )
+            self.add_event_postprocessor(
+                k,
+                get_transform_postprocessor(
+                    k,
+                    invert = True,
+                )
+            )
 
         # Add binary versions of propagation / shrink
-        bin_keys = ['mark_propGrowAnterior',
-                    'mark_propGrowLeft',
-                    'mark_propGrowPosterior',
-                    'mark_propGrowRight',
-                    'mark_propShrinkAnterior',
-                    'mark_propShrinkLeft',
-                    'mark_propShrinkPosterior',
-                    'mark_propShrinkRight',
-                    'mark_propGrowLateral',
-                    'mark_propGrowMedial',
-                    'mark_propShrinkLateral',
-                    'mark_propShrinkMedial']
+        bin_keys = [
+            'mark_propGrowAnterior',
+            'mark_propGrowLeft',
+            'mark_propGrowPosterior',
+            'mark_propGrowRight',
+            'mark_propShrinkAnterior',
+            'mark_propShrinkLeft',
+            'mark_propShrinkPosterior',
+            'mark_propShrinkRight',
+            'mark_propGrowLateral',
+            'mark_propGrowMedial',
+            'mark_propShrinkLateral',
+            'mark_propShrinkMedial'
+        ]
         for k in bin_keys:
-            self.add_event_postprocessor( f'{k}_bin', get_transform_postprocessor( k, binarize = True ) )
+            self.add_event_postprocessor(
+                f'{k}_bin',
+                get_transform_postprocessor(
+                    k,
+                    binarize = True,
+                )
+            )
 
         # Add long transforms
-        log_keys = ['mark_area',
-                    'mark_circMetric',
-                    'mark_decayTau',
-                    'mark_dffMax',
-                    'mark_dffMax2',
-                    'mark_fall91',
-                    'mark_nOccurSameLoc',
-                    'mark_nOccurSameLocSize',
-                    'mark_peri',
-                    'mark_propGrowAnterior',
-                    'mark_propGrowLeft',
-                    'mark_propGrowPosterior',
-                    'mark_propGrowRight',
-                    'mark_propShrinkAnterior',
-                    'mark_propShrinkLeft',
-                    'mark_propShrinkPosterior',
-                    'mark_propShrinkRight',
-                    'mark_propGrowLateral',
-                    'mark_propGrowMedial',
-                    'mark_propShrinkLateral',
-                    'mark_propShrinkMedial',
-                    'mark_rise19',
-                    'mark_width11',
-                    'mark_width55']
+        log_keys = [
+            'mark_area',
+            'mark_circMetric',
+            'mark_decayTau',
+            'mark_dffMax',
+            'mark_dffMax2',
+            'mark_fall91',
+            'mark_nOccurSameLoc',
+            'mark_nOccurSameLocSize',
+            'mark_peri',
+            'mark_propGrowAnterior',
+            'mark_propGrowLeft',
+            'mark_propGrowPosterior',
+            'mark_propGrowRight',
+            'mark_propShrinkAnterior',
+            'mark_propShrinkLeft',
+            'mark_propShrinkPosterior',
+            'mark_propShrinkRight',
+            'mark_propGrowLateral',
+            'mark_propGrowMedial',
+            'mark_propShrinkLateral',
+            'mark_propShrinkMedial',
+            'mark_rise19',
+            'mark_width11',
+            'mark_width55'
+        ]
         for k in log_keys:
-            self.add_event_postprocessor( f'{k}_log', get_transform_postprocessor( k, log = True ) )
+            self.add_event_postprocessor(
+                f'{k}_log',
+                get_transform_postprocessor(
+                    k,
+                    log = True,
+                )
+            )
     
     @property
     def datasets( self ):
-        """Returns a DataFrame containing information about all the datasets in the hive"""
+        """
+        Returns a DataFrame containing information about all the datasets in the hive
+        """
         
         dataset_specs = []
         
@@ -611,13 +832,23 @@ class HiveManager:
         ret = pd.DataFrame( dataset_specs )
         
         # Add columns defined by postprocessor functions
-#         for key, postprocessor in self.postprocessors.items():
-#             ret[key] = postprocessor( ret )
         _postprocess( ret, self.__dataset_postprocessors )
     
         return ret
     
-    def __get_dataset_keys( self, dataset, dataset_keys ):
+    def __get_dataset_keys(
+            self,
+            dataset: Union[str, dict, Series],
+            dataset_keys: 'list[str]',
+        ) -> 'tuple[dict, list[str]]':
+        """
+        TODO
+
+        Raises
+        ------
+        Exception
+            a key specified in `dataset_keys` is not in the `dataset`
+        """
         
         ret_dataset = None
         ret_keys = []
@@ -627,40 +858,61 @@ class HiveManager:
             ret_dataset = self.parser( dataset )
         else:
             ret_dataset = dataset
-        
+
+        # ret_dataset should be normalized as a dict here
+
         if dataset_keys is None:
             # Default behavior is to merge all parts of the dataset spec except the filename
-            ret_keys = [k for k in dataset.keys() if k != 'filename']
+            ret_keys = [ k
+                         for k in ret_dataset.keys()
+                         if k != 'filename' ]
         else:
             # Check to make sure the desired keys are in the dataset
             for k in dataset_keys:
-                if k not in dataset.keys():
+                if k not in ret_dataset.keys():
                     raise Exception( f'Merge key "{k}" not in dataset' )
                 ret_keys.append( k )
         
+        # TODO Type ambiguity here in `ret_dataset` in general
+
         return ret_dataset, ret_keys
     
-    def load_events( self, dataset,
-                     dataset_keys = None,
-                     header_keys = None,
-                     postprocess = True ):
-        """Load the events from a given dataset
+    def load_events(
+            self,
+            dataset: Union[str, Series], # TODO 
+            dataset_keys: 'Optional[list[str]]' = None,
+            header_keys: 'Optional[list[str]]' = None,
+            postprocess: bool = True,
+        ) -> 'tuple[dict[str, Any], DataFrame]':
+        """
+        Load the events from a given `dataset`
         
-        Returns:
-        header - overall information about the dataset
-        events - DataFrame, each row is an astrocyte event
-        
-        Arguments:
-        dataset - a string denoting the filename in the hive to load, or a Series containing
+        Parameters
+        ----------
+        dataset : Union[str, Series]
+            a string denoting the filename in the hive to load, or a Series containing
             a 'filename' key
-        
-        Keyword arguments:
-        dataset_keys - a list of keys from the `dataset` Series to merge into all entries
+        dataset_keys : list[str] (optional)
+            a list of keys from the `dataset` Series to merge into all entries
             of the returned data. Default behavior is to include all elements of `dataset`
-            except for 'filename'
-        header_keys - a list of keys from the dataset header to merge into all entries of
-            the returned data. Default behavior is to include none
-        postprocess - set to False to disable event postprocessing. Default: True
+            except for 'filename'.
+        header_keys : list[str] (optional)
+            a list of keys from the dataset header to merge into all entries of
+            the returned data. Default behavior is to include none.
+        postprocess : bool (optional)
+            set to `False` to disable event postprocessing. Default: True.
+        
+        Returns
+        -------
+        header : dict[str, Any]
+            overall information about the dataset
+        events : DataFrame
+            each row is an astrocyte event
+        
+        Raises
+        ------
+        Exception
+            unable to infer the filename of the `dataset`
         """
         
         dataset, dataset_keys = self.__get_dataset_keys( dataset, dataset_keys )
@@ -678,7 +930,12 @@ class HiveManager:
         
         # TODO More intelligent way to do this?
         # These keys are specially handled
-        system_keys = ['fs', 'Ts', 'eventFrames', 'eventCells']
+        system_keys = [
+            'fs',
+            'Ts',
+            'eventFrames',
+            'eventCells',
+        ]
         
         # Load data from file
         file_path = os.path.join( self.path, dataset['filename'] )
@@ -736,7 +993,6 @@ class HiveManager:
         ret = pd.DataFrame.from_dict( ret_dict )
         
         for k in dataset_keys:
-#             print( k, dataset[k] )
             ret[k] = dataset[k]
             
         for k in header_keys:
@@ -748,30 +1004,50 @@ class HiveManager:
         return header, ret
     
     # TODO (?) Break raster computation out of HiveManager; it should be its own thing
-    def load_raster( self, dataset,
-                     dataset_keys = None,
-                     header_keys = None,
-                     bin_width = None,
-                     output = 'df' ):
-        """Construct a raster from the events in a dataset
+    def load_raster(
+            self,
+            dataset: Union[str, Series],
+            dataset_keys: 'Optional[list[str]]' = None,
+            header_keys: 'Optional[list[str]]' = None,
+            bin_width: Optional[float] = None,
+            output: str = 'df',
+        ) -> 'tuple[dict[str, Any], Union[DataFrame, NDArray]]':
+        """
+        Construct a raster from the events in a dataset
         
-        Returns:
-        header - overall information about the dataset
-        raster - the raster in the format specified by the `output` kwarg:
+        TODO Currently does not run postprocessors
+
+        Parameters
+        ----------
+        dataset : Union[str, Series]
+            a string denoting the filename in the hive to load, or a Series containing
+            a 'filename' key
+        dataset_keys : list[str] (optional)
+            a list of keys from the `dataset` Series to merge into all entries
+            of the returned data. Default behavior is to include all elements of `dataset`
+            except for 'filename'
+        header_keys : list[str] (optional)
+            a list of keys from the dataset header to merge into all entries of
+            the returned data. Default behavior is to include none
+        bin_width : float (optional)
+            the width of each time bin in the raster (in seconds). Default: one frame.
+
+        Returns
+        -------
+        header : dict[str, Any]
+            overall information about the dataset
+        raster : Union[DataFrame, NDArray]
+            the raster in the format specified by the `output` kwarg:
             'df' - (Default) `raster` is a DataFrame, where each row is a bin for an individual cell
             'array' - `raster` is a [cell, bin] numpy array
         
-        Arguments:
-        dataset - a string denoting the filename in the hive to load, or a Series containing
-            a 'filename' key
-        
-        Keyword arguments:
-        dataset_keys - a list of keys from the `dataset` Series to merge into all entries
-            of the returned data. Default behavior is to include all elements of `dataset`
-            except for 'filename'
-        header_keys - a list of keys from the dataset header to merge into all entries of
-            the returned data. Default behavior is to include none
-        bin_width - the width of each time bin in the raster (in seconds). Default: one frame.
+        Raises
+        ------
+        Exception
+            * unable to infer the filename of the `dataset`
+            * no cell identifiers present
+            * specified a bin width in seconds, but no start times in seconds
+            * unknown output format
         """
         
         dataset, dataset_keys = self.__get_dataset_keys( dataset, dataset_keys )
@@ -876,8 +1152,12 @@ class HiveManager:
         # Unknown output format
         raise Exception( f'Unknown output format: {output}' )
     
-    def iter_dataset_events( self, **kwargs):
-        """Generates an iterator of the form (dataset, header, events) where
+    def iter_dataset_events(
+            self,
+            **kwargs
+        ): # TODO Shortcut for proper iterator return type
+        """
+        Generates an iterator of the form (dataset, header, events) where
         
         dataset - the parsed specification of the current dataset's filename
         header - overall information about the dataset
@@ -889,7 +1169,10 @@ class HiveManager:
         return ( (dataset,) + self.load_events( dataset, **kwargs )
                  for _, dataset in self.datasets.iterrows() )
     
-    def iter_dataset_rasters( self, **kwargs ):
+    def iter_dataset_rasters(
+            self,
+            **kwargs
+        ): # TODO Shortcut for proper iterator return type
         """Generates an iterator of the form (dataset, header, raster) where
         
         dataset - the parsed specification of the current dataset's filename
@@ -904,19 +1187,29 @@ class HiveManager:
         return ( (dataset,) + self.load_raster( dataset, **kwargs )
                  for _, dataset in self.datasets.iterrows() )
     
-    def all_events( self,
-                    verbose = False,
-                    **kwargs ):
-        """Returns all events for all datasets in the hive (from `iter_dataset_events`)
-        concatenated vertically
+    def all_events(
+            self,
+            verbose: bool = False,
+            **kwargs
+        ) -> 'tuple[dict[str, Any], DataFrame]':
+        """
+        Returns all events for all datasets in the hive (from `iter_dataset_events`) concatenated vertically
         
-        Returns: (headers, events)
-        headers - dict of header data from each dataset, keyed by `dataset_id`
-        events - DataFrame, each row is an astrocyte event
-        
-        Keyword arguments:
-        verbose - if True, prints out the name of each processed file
+        (Runs postprocessing by default)
+
+        Parameters
+        ----------
+        verbose : bool (optional)
+            if `True`, prints out the name of each processed file (default:
+            `False`)
         The rest are passed through to `load_events`
+
+        Returns
+        -------
+        headers : dict[str, Any]
+            dict of header data from each dataset, keyed by `dataset_id`
+        events : DataFrame
+            each row is an astrocyte event
         """
         
         headers = dict()
@@ -935,8 +1228,6 @@ class HiveManager:
             if ret is None:
                 ret = events
             else:
-                # DataFrame.append was removed
-                # ret = ret.append( events, ignore_index = True )
                 ret = pd.concat( [ret, events], ignore_index = True )
                 
         postprocess = kwargs.get( 'postprocess', True )
@@ -945,21 +1236,29 @@ class HiveManager:
         
         return headers, ret
     
-    def all_rasters( self,
-                     verbose = False,
-                     **kwargs ):
-        """Returns all rasters for all datasets in the hive (from `iter_dataset_rasters`)
-        concatenated vertically
+    def all_rasters(
+            self,
+            verbose: bool = False,
+            **kwargs
+        ):
+        """
+        Returns all rasters for all datasets in the hive (from `iter_dataset_rasters`) concatenated vertically
         
-        Returns: (headers, raster)
-        headers - dict of header data from each dataset, keyed by `dataset_id`
-        raster - the raster in the format specified by the `output` kwarg:
-            'df' - (Default) `raster` is a DataFrame, where each row is a bin for an individual cell
-            'array' - `raster` is a [cell, bin] numpy array
-        
-        Keyword arguments:
-        verbose - if True, prints out the name of each processed file
+        Parameters
+        ----------
+        verbose : bool (optional)
+            if `True`, prints out the name of each processed file (default:
+            `False`)
         The rest are passed through to `load_events`
+
+        Returns
+        -------
+        headers : dict[str, Any]
+            dict of header data from each dataset, keyed by `dataset_id`
+        raster : Union[DataFrame, NDArray]
+            the raster in the format specified by the `output` kwarg:
+            'df' - (Default) `raster` is a DataFrame, where each row is a bin for an individual cell
+            'array' - `raster` is a [cell, bin] numpy array (**not implemented**)
         """
         
         ## TODO Fix appending for when `output` == 'array'

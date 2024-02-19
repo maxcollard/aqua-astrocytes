@@ -5,6 +5,17 @@ For details of AQuA for Matlab, see https://github.com/yu-lab-vt/AQuA
 
 ## Imports
 
+from typing import (
+    Optional,
+)
+from numpy.typing import (
+    ArrayLike,
+    NDArray,
+)
+from pandas import (
+    DataFrame,
+)
+
 import warnings
 import copy
 
@@ -27,18 +38,43 @@ import functools
 
 ## General statistics
 
-def perm_stat( xs, ys, f,
-               n = 1000,
-               paired = False ):
-    """Statistic `f` (a function taking the two datasets as arguments) quantifying
-    the difference between data in `xs` and data in `ys`, computed in an imposed
+def perm_stat(
+        xs: ArrayLike,
+        ys: ArrayLike,
+        f, # TODO Type annotation for statistic function
+        n: int = 1000,
+        paired: bool = False,
+    ) -> NDArray:
+    """
+    Value of the difference statistic `f` when `xs` and `ys` are permuted
+
+    , computed in an imposed
     permuted null hypothesis
     
-    Keyword arguments:
-    n - the number of permutations
-    paired - whether to treat the observations in `xs` and `ys` as paired when permuting
+    Parameters
+    ----------
+    xs, ys : ArrayLike
+        input data from the groups being compared
+    f
+        statistic (a function taking the two datasets as arguments) quantifying
+        the difference between data in `xs` and data in `ys`
+    n : int (optional)
+        the number of permutations (default: 1000)
+    paired : bool (optional)
+        whether to treat the observations in `xs` and `ys` as paired when permuting
         (In the paired case, data points are randomly "flipped" between the categories x and y while
         maintaining the pairings of individual data points.)
+        (Default: `False`)
+    
+    Returns
+    -------
+    NDArray
+        the values of `f(xs, ys)` from each permuted case
+
+    Raises
+    ------
+    ValueError
+        paired is `True`, and `xs` and `ys` have a different size
     """
     
     if paired:
@@ -49,7 +85,7 @@ def perm_stat( xs, ys, f,
     
     for i in range( n ):
         if paired:
-            flip = np.random.randint( 2, xs.shape )
+            flip = np.random.randint( 2, size = xs.shape )
             xs_cur = np.zeros( xs.shape )
             ys_cur = np.zeros( ys.shape )
             xs_cur[flip == 0] = xs[flip == 0]
@@ -66,8 +102,14 @@ def perm_stat( xs, ys, f,
     
     return ret
 
-def circ_shift( xs, dx, window ):
-    "Shift `xs` by `dx`, constrained to lie within [`window[0]`, window[1])"
+def circ_shift(
+        xs: NDArray,
+        dx: float,
+        window, # TODO Type annotation for something that can be coerced to tuple[float, float]
+    ):
+    """
+    Shift `xs` by `dx`, constrained to lie within [`window[0]`, window[1])
+    """
     
     dw = window[1] - window[0] # The size of the window
     ret = xs - window[0] # Adjust so that window starts at x = 0
@@ -76,10 +118,15 @@ def circ_shift( xs, dx, window ):
     ret = ret + window[0] # Move the data back to the original time base
     return ret
 
-def circ_shift_groups_random( df, window,
-                              shift_key = 'start_time_rel',
-                              group_key = 'cell_global_all' ):
-    "Shift the events in `df` independently for each group in `group_key`"
+def circ_shift_groups_random(
+        df: DataFrame,
+        window, # TODO Type annotation for something that can be coerced to tuple[float, float]
+        shift_key: str = 'start_time_rel',
+        group_key: str = 'cell_global_all',
+    ) -> DataFrame:
+    """
+    Shift the events in `df` independently for each group in `group_key` (in a copy)
+    """
     
     ret = df.copy()
     
@@ -90,14 +137,32 @@ def circ_shift_groups_random( df, window,
     
     return ret
 
-def perm_stat_df( df_x, df_y, f, n = 1000, verbose = False ):
-    """Statistic `f` (a function taking the two datasets as arguments) quantifying
-    the difference between data in `df_x` and data in `df_y`, computed in an imposed
-    permuted null hypothesis
+def perm_stat_df(
+        df_x: DataFrame,
+        df_y: DataFrame,
+        f, # TODO Type annotation for statistic function
+        n: int = 1000,
+        verbose: bool = False
+    ) -> NDArray:
+    """
+    Value of the difference statistic `f` when input `DataFrame`s `df_x` and `df_y` are permuted
+
+    Parameters
+    ----------
+    df_x, df_y : DataFrame
+        the data for the two groups being compared
+    f
+        Statistic(a function taking the two datasets as arguments) quantifying
+        the difference between data in `df_x` and data in `df_y`
+    n : int (optional)
+        the number of permutations (default: 1000)
+    verbose : bool (optional)
+        if `True`, print a progress bar (default: `False`)
     
-    Keyword arguments:
-    n - the number of permutations (default: 1000)
-    verbose - if `True`, print a progress bar (default: False)
+    Returns
+    -------
+    NDArray
+        value of `f(df_x, df_y)` for each permutation iteration
     """
     
     label_key = '__perm_label__'
@@ -125,13 +190,22 @@ def perm_stat_df( df_x, df_y, f, n = 1000, verbose = False ):
         
     return ret
 
-def boot_stat( xs, f,
-               n = 1000 ):
-    """Statistic `f` (a function taking the data as an argument) computed by resampling
-    the data `xs` with replacement
-    
-    Keyword arguments:
-    n - the number of bootstrap samples to compute (default: 1000)
+def boot_stat(
+        xs: NDArray,
+        f, # TODO Type annotation for statistic function type
+        n: int = 1000
+    ) -> NDArray:
+    """
+    Estimate surrogate values of `f` by resampling `xs` with replacement
+
+    Parameters
+    ----------
+    xs : NDArray
+        original data
+    f
+        statistic (a function taking the data as an argument)
+    n : int (optional)
+        the number of bootstrap samples to compute (default: 1000)
     """
     
     n_x = len( xs )
@@ -143,8 +217,13 @@ def boot_stat( xs, f,
     
     return boot_values
 
-def ecdf( data, xs ):
-    """Returns the empirical cdf of `data` evaluated at `xs`"""
+def ecdf(
+        data: NDArray,
+        xs: NDArray
+    ) -> NDArray:
+    """
+    Empirical cdf of `data` evaluated at `xs`
+    """
     
     ret = np.zeros( xs.shape )
     for i, x in enumerate( xs ):
@@ -154,27 +233,45 @@ def ecdf( data, xs ):
 
 ## General analyses
 
-def ramp_effects( df, window,
-                  window_key = 'center_time',
-                  outcome_key = 'event_count',
-                  group_key = 'cell_global',
-                  p_threshold = 0.05,
-                  verbose = False,
-                  **kwargs ):
-    """Determine the effect of time in `window` on event rate in the DataFrame raster `df`
-    using statsmodels' GLM implementation
+def ramp_effects(
+        df: DataFrame,
+        window, # TODO Proper type annotation
+        window_key: str = 'center_time',
+        outcome_key: str = 'event_count',
+        group_key: str = 'cell_global',
+        p_threshold: float = 0.05,
+        verbose: bool = False,
+        **kwargs
+    ) -> DataFrame:
+    """
+    Determine the effect of time in `window` on event rate using `statsmodels`' GLM implementation
     
-    Keyword arguments:
-    outcome_key - key in `df` to check if there's a ramp effect on
+    Parameters
+    ----------
+    df : DataFrame
+        event raster (as returned by a `manager.HiveManager`)
+    window
+        `(window[0], window[1])` is used as the time bounds to look for effects
+    outcome_key : str (optional)
+        key in `df` to check if there's a ramp effect on
         (Default: 'event_count')
-    group_key - ramp effects are determined for each unique value of `group_key`
+    group_key : str (optional)
+        ramp effects are determined for each unique value of `group_key`
         (Default: 'cell_global')
-    window_key - key to use as the independent variable (i.e. "time";
-        default: 'center_time')
-    p_threshold - p-value threshold for significant ramp effect
-    verbose - if True, show a progress bar
+    window_key : str (optional)
+        key to use as the independent variable (i.e. "time"
+        (Default: 'center_time')
+    p_threshold : float (optional)
+        p-value threshold for significant ramp effect (default: `0.05`)
+    verbose : bool (optional)
+        if `True`, show a progress bar (default: `False`)
+    **kwargs
+        passed to `glm` in `statsmodels`
     
-    The rest of the kwargs are passed to `glm`
+    Returns
+    -------
+    DataFrame
+        ramp effect results for each group in `df`
     """
     
     it = df.groupby( group_key )
@@ -234,32 +331,56 @@ _default_pca_keys = [
     'mark_peri_log',
     'mark_rise19_log',
     'mark_width11_log',
-    'mark_width55_log'
+    'mark_width55_log',
 ]
 
-def event_pca( events,
-               keys = _default_pca_keys,
-               return_object = False,
-               **kwargs ):
-    """Perform PCA on `events` using the features in `keys`
-    
-    If `return_object` is true, returns the PCA object from sklearn.decomposition
-    
-    Otherwise (default), returns (loadings, frac_variance, scores) where
-        loadings - DataFrame where each row is a PC and each column is an input feature in `keys`
-        frac_variance - Series where each entry is the fraction of variance explained by a PC
-        scores - DataFrame where each row is an event from `events` and each column is the score
-            for each PC
-    
-    kwargs are passed to PCA
+def event_pca(
+        events: DataFrame,
+        keys: Optional[list] = None,
+        return_object: bool = False,
+        **kwargs
+    ): # TODO Proper type annotation for this compound return type
     """
+    Perform PCA on `events` using the features in `keys`
+    
+    Parameters
+    ----------
+    events : DataFrame
+        table of event characteristics (as produced by `manager.HiveManager`)
+    keys : list (optional)
+        list of keys to use for PCA (default: see `_default_pca_keys`)
+    return_object : bool (optional)
+        if `True`, returns the PCA object from `sklearn.decomposition`.
+        Otherwise (default), returns `(loadings, frac_variance, scores)` where
+        loadings : DataFrame
+            each row is a PC and each column is an input feature in `keys`
+        frac_variance : Series
+            each entry is the fraction of variance explained by a PC
+        scores : DataFrame
+            each row is an event from `events` and each column is the score
+            for each PC
+    **kwargs
+        passed to `PCA` in `sklearn.decomposition`
+    
+    Returns
+    -------
+    See 'Parameters', above
+
+    Raises
+    ------
+    ValueError
+        none of the requested analysis `keys` are present in `events`
+    """
+
+    if keys is None:
+        keys = _default_pca_keys
     
     ## Preprocess
     
     # Check that the keys we want are available
     good_keys = [ k for k in keys if k in events.keys() ]
     if len( good_keys ) < 1:
-        raise Exception( 'None of the keys in `keys` are in `events`' )
+        raise ValueError( 'None of the keys in `keys` are in `events`' )
     
     # Remove bad data points
     good_idx = ~np.any( np.isnan( events[good_keys] ), axis = 1 )
@@ -297,6 +418,8 @@ def event_pca( events,
         scores.iloc[i_row] = row_score
         
     return loadings, frac_variance, scores
+
+### TODO From here on out, may not be well-documented
 
 def compare_rates( rf1, rf2, t, n ):
     """Compare two rate functions `rf1` and `rf2` using `n` iterations of the
