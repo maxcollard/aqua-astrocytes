@@ -7,7 +7,7 @@ setup(
     ],
 
     # TODO Pull from source
-    version = '0.1-rc-1',
+    version = '0.1-rc.1',
 
     description = 'A Python interface for astrocyte quantification and analysis',
     # TODO Add long_description
