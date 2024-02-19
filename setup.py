@@ -14,7 +14,7 @@ setup(
     # long_description = '...',
     author = 'Max Collard',
     author_email = 'maxwell.collard@ucsf.edu',
-    url = 'https://github.com/maxcollard/aqua-py',
+    url = 'https://github.com/maxcollard/aqua-astrocytes',
     license = 'MIT',
     classifiers = [
         'Development Status :: 3 - Alpha',
